@@ -1,0 +1,14 @@
+{
+  "name": "Thaís de Paula Ateliê",
+  "short_name": "TP Ateliê",
+  "description": "Transformando papel em momentos especiais. Papelaria personalizada sob demanda e a pronta entrega.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBEDE6",
+  "theme_color": "#4A2A20",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

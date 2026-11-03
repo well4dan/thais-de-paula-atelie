@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel Administrativo de Gestão | Thaís de Paula Ateliê</title>
+  <meta name="description" content="Painel administrativo de demonstração do Thaís de Paula Ateliê para gestão de pedidos personalizados, controle de estoque a pronta entrega e cupons.">
+  <link rel="canonical" href="https://thaisdepaulaatelie.com.br/painel-tp/">
+  <meta name="theme-color" content="#FBEDE6">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Painel Administrativo de Gestão | Thaís de Paula Ateliê">
+  <meta property="og:description" content="Painel administrativo de demonstração do Thaís de Paula Ateliê.">
+  <meta property="og:url" content="https://thaisdepaulaatelie.com.br/painel-tp/">
+  <meta property="og:image" content="https://thaisdepaulaatelie.com.br/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Painel Thaís de Paula Ateliê",
+    "applicationCategory": "BusinessApplication"
+  }
+  </script>
+
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/overlays.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+  <!-- Tela de bloqueio por PIN (apenas demonstração) -->
+  <section class="admin-lock" id="admin-lock">
+    <div class="bezel" style="width:min(420px,100%)">
+      <div class="bezel__core" style="padding:2.25rem;text-align:center">
+        <span class="brand__script" style="font-size:2.4rem">Thaís de Paula</span>
+        <h2 style="font-size:1.75rem;margin-top:0.25rem">Painel do Ateliê</h2>
+        <p class="muted" style="font-size:var(--t-sm);margin-top:0.35rem">Área oculta de demonstração. Digite o PIN para gerenciar pedidos, estoque e produtos.</p>
+
+        <form id="pin-form" style="display:grid;gap:0.75rem;margin-top:1.5rem;text-align:left" novalidate>
+          <div class="field">
+            <label for="pin-input">PIN de acesso (padrão da demo: 2611)</label>
+            <input class="input" id="pin-input" type="password" inputmode="numeric" placeholder="2611" required autocomplete="off">
+            <span class="field__error" id="pin-error"></span>
+          </div>
+          <button class="btn btn--block btn--plain" type="submit">Entrar no painel</button>
+          <a class="btn btn--ghost btn--plain btn--block" href="/">Voltar para a vitrine</a>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- Casca principal do painel -->
+  <div class="admin-shell" id="admin-shell" hidden>
+    <aside class="admin-side">
+      <div>
+        <a class="brand" href="/" style="align-items:flex-start">
+          <span class="brand__script">Thaís de Paula</span>
+          <span class="brand__sub">PAINEL ADMIN</span>
+        </a>
+
+        <nav class="admin-nav" role="tablist" aria-label="Seções do painel">
+          <button type="button" role="tab" aria-selected="true" data-admin-tab="visao">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-chart"></use></svg>
+            <span>Visão geral</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" data-admin-tab="pedidos">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-receipt"></use></svg>
+            <span>Pedidos</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" data-admin-tab="produtos">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-store"></use></svg>
+            <span>Produtos e estoque</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" data-admin-tab="cupons">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-tag"></use></svg>
+            <span>Cupons</span>
+          </button>
+          <button type="button" role="tab" aria-selected="false" data-admin-tab="config">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-gear"></use></svg>
+            <span>Configurações</span>
+          </button>
+        </nav>
+      </div>
+
+      <div style="display:grid;gap:0.5rem;margin-top:2rem">
+        <a class="btn btn--sm btn--ghost" href="/" target="_blank" rel="noopener noreferrer">Ver loja aberta</a>
+        <button class="btn btn--sm btn--ghost" id="btn-logout" type="button">Bloquear painel</button>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <div class="admin-top">
+        <div>
+          <h1 style="font-size:2rem">Gestão do Ateliê</h1>
+          <p class="muted" style="font-size:var(--t-sm)">Qualquer alteração feita aqui reflete imediatamente na loja deste navegador.</p>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+          <button class="btn btn--sm btn--ghost" id="btn-export-csv" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-download"></use></svg>
+            <span>Exportar pedidos CSV</span>
+          </button>
+          <button class="btn btn--sm btn--ghost" id="btn-reset-demo" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-reset"></use></svg>
+            <span>Restaurar dados da demo</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="admin-view"></div>
+    </main>
+  </div>
+
+  <dialog class="dialog dialog--wide" id="admin-dialog">
+    <div class="dialog__head">
+      <h2 id="admin-dialog-title">Detalhes</h2>
+      <button class="icon-btn" id="admin-dialog-close" type="button" aria-label="Fechar janela">
+        <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-x"></use></svg>
+      </button>
+    </div>
+    <div class="dialog__body" id="admin-dialog-body"></div>
+  </dialog>
+
+  <script type="module" src="/js/admin/app.js"></script>
+</body>
+</html>

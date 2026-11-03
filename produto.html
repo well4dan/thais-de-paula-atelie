@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personalizar Produto Sob Demanda | Thaís de Paula Ateliê</title>
+  <meta name="description" content="Personalize sua peça no Thaís de Paula Ateliê com nome, tema, cores ou foto com prévia imediata, ou escolha mimos disponíveis para pronta entrega rápida.">
+  <link rel="canonical" href="https://thaisdepaulaatelie.com.br/produto.html">
+  <meta name="theme-color" content="#FBEDE6">
+
+  <meta property="og:type" content="product">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:site_name" content="Thaís de Paula Ateliê">
+  <meta property="og:title" content="Personalizar Produto Sob Demanda | Thaís de Paula Ateliê">
+  <meta property="og:description" content="Papelaria personalizada sob demanda e itens a pronta entrega.">
+  <meta property="og:url" content="https://thaisdepaulaatelie.com.br/produto.html">
+  <meta property="og:image" content="https://thaisdepaulaatelie.com.br/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "Papelaria Personalizada Thaís de Paula Ateliê",
+    "image": "https://thaisdepaulaatelie.com.br/img/p-caderno.webp",
+    "description": "Peça personalizada sob demanda ou a pronta entrega feita no Thaís de Paula Ateliê."
+  }
+  </script>
+
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+
+  <link rel="preload" href="/fonts/cormorant-garamond-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/figtree-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/allura-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/overlays.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <script src="/js/boot.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <div class="demo-bar" role="region" aria-label="Aviso de demonstração">
+    <span>Prévia de demonstração: os pedidos e pagamentos são simulados e os preços são ilustrativos.</span>
+    <button class="demo-bar__close" type="button" aria-label="Fechar aviso">
+      <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-x"></use></svg>
+    </button>
+  </div>
+
+  <header class="site-header">
+    <div class="site-header__bar">
+      <a class="brand" href="/" aria-label="Thaís de Paula Ateliê, página inicial">
+        <span class="brand__script">Thaís de Paula</span>
+        <span class="brand__sub">ATELIÊ</span>
+      </a>
+
+      <nav class="site-nav" aria-label="Principal">
+        <a href="/#linhas">Nossas criações</a>
+        <a href="/#modos">Pronta entrega e sob demanda</a>
+        <a href="/loja.html">Loja</a>
+        <a href="/#sobre">O ateliê</a>
+        <a href="/#duvidas">Dúvidas</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="icon-btn" type="button" data-open-cart aria-label="Abrir carrinho">
+          <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-bag"></use></svg>
+          <span class="cart-count" data-cart-count data-empty="true">0</span>
+        </button>
+        <button class="icon-btn menu-toggle" type="button" aria-expanded="false" aria-controls="menu-mobile" aria-label="Abrir menu">
+          <span class="menu-toggle__lines"><span></span><span></span></span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="mobile-menu" id="menu-mobile" aria-label="Menu móvel" inert>
+      <a href="/#linhas">Nossas criações</a>
+      <a href="/#modos">Pronta entrega e sob demanda</a>
+      <a href="/loja.html">Loja completa</a>
+      <a href="/#sobre">O ateliê</a>
+      <a href="/#duvidas">Dúvidas frequentes</a>
+    </nav>
+  </header>
+
+  <main id="conteudo" class="section" style="padding-top:2.5rem">
+    <div class="container">
+      <nav aria-label="Você está em" style="font-size:var(--t-xs);color:var(--ink-2);margin-bottom:1.25rem">
+        <a href="/">Início</a> / <a href="/loja.html">Loja</a> / <a id="crumb-line" href="/loja.html">Linha</a> / <span id="crumb-prod">Produto</span>
+      </nav>
+
+      <div class="product-view" id="product-root">
+        <h1 class="section-title">Carregando peça do ateliê...</h1>
+      </div>
+
+      <section style="margin-top:5rem">
+        <h2 class="section-title">Combina com a sua escolha</h2>
+        <div class="products-grid" id="related-grid"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-legal">
+        <span>© <span data-year>2026</span> Thaís de Paula Ateliê.</span>
+        <span>Ambiente de demonstração com pagamentos simulados.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script defer src="/js/vendor/lenis.min.js"></script>
+  <script defer src="/js/vendor/gsap.min.js"></script>
+  <script defer src="/js/vendor/ScrollTrigger.min.js"></script>
+  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/product.js"></script>
+</body>
+</html>
