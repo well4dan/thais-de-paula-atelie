@@ -10,7 +10,9 @@
 * **Stack Tecnológico:**
   * **Frontend:** HTML5 Semântico, CSS3 Modular (`css/variables.css`, `css/main.css`, `css/pages.css`, `css/account.css`), Vanilla JavaScript moderno (ES Modules).
   * **Backend / API:** Node.js Nativo (`http`, `crypto`), sem Express (`server.mjs`, `server/auth-routes.mjs`, `server/security.mjs`, `server/pg-pool.mjs`, `server/db.mjs`).
-  * **Banco de Dados:** **Supabase PostgreSQL** via `pg@8.13.3` (`DATABASE_URL` no `.env`). Row Level Security (RLS) habilitada em todas as 11 tabelas.
+  * **Banco de Dados:** **Supabase PostgreSQL** via `pg@8.13.3` (`DATABASE_URL` no `.env`). Row Level Security (RLS) habilitada em todas as 13 tabelas.
+  * **Painel admin:** login no servidor com `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` no `.env` (gerar com `npm run admin:hash`). Sem servidor (Vercel estática, só demonstração), o painel cai em modo demonstração com PIN local.
+  * **Hospedagem atual:** Vercel apenas como **demonstração estática** para a cliente (sem Node, sem dados reais). O backend Node + Supabase roda só localmente por enquanto.
   * **Criptografia & Auth:** Senhas com `scrypt` + salt criptográfico. CPF com `AES-256-GCM` em repouso e índice cego `HMAC-SHA256` para busca única sem expor dados. Sessões com Cookie `HttpOnly; SameSite=Lax` e proteção CSRF com `X-CSRF-Token`.
   * **Keep-Alive Supabase (Anti-Pausa):** Sistema triplo (cron interno de 6h no servidor, endpoint `GET /api/v1/health/keep-alive` e workflow do GitHub Actions `.github/workflows/supabase-keepalive.yml` a cada 48h).
   * **Conformidade Legal:** Termos de Uso ([termos-de-uso.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/termos-de-uso.html)), Termo de Consentimento LGPD ([termo-lgpd.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/termo-lgpd.html)), Política de Privacidade ([politica-de-privacidade.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/politica-de-privacidade.html)), e Portal de Autoatendimento com Portabilidade JSON e Direito ao Esquecimento ([minha-conta.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/minha-conta.html)).
@@ -60,19 +62,26 @@
 │   ├── security.mjs                    # Criptografia AES-256-GCM, Blind Index HMAC, scrypt e CSRF
 │   ├── pg-pool.mjs                     # Pool PostgreSQL (pg) com normalização de URI e Keep-Alive
 │   ├── db.mjs                          # Camada DAL para usuários, sessões, pedidos, produtos e consentimentos
-│   ├── zip.mjs                         # Gerador nativo PKZIP (CRC-32 + STORE) sem dependências externas
-│   └── auth-routes.mjs                 # Roteador das APIs (/api/v1/auth/*, /api/v1/me/*, /api/v1/store/*, /api/v1/health/*)
+│   ├── zip.mjs                         # Gerador PKZIP em streaming (STORE + data descriptor + zlib.crc32 nativo)
+│   ├── http-utils.mjs                  # Cookies, JSON, IP, rate limit e comparação em tempo constante (compartilhado)
+│   ├── admin-auth.mjs                  # Login da administradora (ADMIN_EMAIL + ADMIN_PASSWORD_HASH) e sessões admin_sessions
+│   ├── admin-routes.mjs                # Rotas exclusivas da admin (negado por padrão): snapshot, pedidos, produtos, fotos, .ZIP
+│   └── auth-routes.mjs                 # Roteador principal: health, rotas públicas da loja, auth/me das clientes e despacho admin
 ├── scripts/
-│   └── keep-alive.mjs                  # Script CLI para disparar batimento no Supabase (`npm run keep-alive`)
+│   ├── keep-alive.mjs                  # Script CLI para disparar batimento no Supabase (`npm run keep-alive`)
+│   └── admin-hash.mjs                  # Pede e-mail + senha da admin e grava ADMIN_EMAIL/ADMIN_PASSWORD_HASH no .env (`npm run admin:hash`)
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial_schema.sql      # Schema inicial de teste
 │       ├── 002_full_ecommerce_and_keepalive.sql # Migration base (11 tabelas, RLS e índices)
-│       └── 003_order_attachments_ttl7d.sql      # Cofre temporário de imagens originais dos clientes (TTL 7 dias + expurgo SQL)
+│       ├── 003_order_attachments_ttl7d.sql      # Cofre temporário de imagens originais dos clientes (TTL 7 dias + expurgo SQL)
+│       └── 004_admin_sessions.sql               # Sessões da administradora + remoção do adminPin das configurações
 ├── tests/
-│   └── security-auth.test.mjs          # Testes automatizados oficiais (10/10 testes passando contra o Supabase)
+│   └── security-auth.test.mjs          # Testes automatizados oficiais (14/14 passando contra o Supabase em 06/11/2026)
 ├── docs/
-│   └── dossie-entrega-cliente.md       # Dossiê em Markdown para entrega à cliente Thaís (futuro PDF)
+│   ├── dossie-entrega-cliente.md       # Dossiê em Markdown para entrega à cliente Thaís (futuro PDF), v1.1
+│   ├── 03-plano-zip-e-painel-seguro.md # Plano aprovado da rodada 03 (arquitetura-blindada) + divergências registradas
+│   └── relatorio-auditoria.md          # Auditorias (rodada inicial + rodada 03 com vetos e backlog)
 └── server.mjs                          # Servidor HTTP principal com cabeçalhos de segurança (CSP, HSTS, X-Frame)
 ```
 
@@ -176,6 +185,44 @@
   * Adicionado botão rápido **"Baixar .ZIP"** diretamente na listagem da tabela de pedidos (ao lado de "Detalhes") sempre que o pedido possuir fotos ativas.
   * Adicionado botão principal **"Baixar todas as fotos (.ZIP)"** na barra de ações do modal de detalhes do pedido.
 
+### [LOG-010] Painel Blindado no Servidor + `.ZIP` em Streaming (protocolo arquitetura-blindada, perfil P2)
+* **Motivo:** a geração do `.ZIP` estava lenta e, ao investigar, apareceu um bloqueador: o painel só tinha PIN no navegador e todas as rotas `/api/v1/store/*` (inclusive `snapshot` com dados de clientes e o PIN) eram públicas. Plano aprovado em [docs/03-plano-zip-e-painel-seguro.md](docs/03-plano-zip-e-painel-seguro.md).
+* **Segurança (Camadas 4 e 8):**
+  * Migração [004_admin_sessions.sql](supabase/migrations/004_admin_sessions.sql): tabela `admin_sessions` (RLS ativa) e remoção de `adminPin` de `store_settings`. `ensureDatabaseReady()` agora aplica 002, 003 e 004 em laço.
+  * [server/admin-auth.mjs](server/admin-auth.mjs): credencial única no `.env`, scrypt sempre executado (sem vazamento por tempo), cookie `tp_admin` `HttpOnly; SameSite=Strict` de 8 h, CSRF.
+  * [server/admin-routes.mjs](server/admin-routes.mjs): `POST /api/v1/admin/login` (5/IP e 30 globais por 15 min), `POST /api/v1/admin/logout`, `GET /api/v1/admin/me`, `GET /api/v1/admin/snapshot` e todas as rotas administrativas antigas no mesmo caminho, agora exigindo sessão (+ CSRF nas escritas).
+  * [server/auth-routes.mjs](server/auth-routes.mjs): rotas públicas da loja são só `GET /store/snapshot` (vitrine), `POST /store/orders`, `POST /store/attachments` (agora com rate limit 60/15 min) e `GET /store/orders/:id/track?phone=XXXX` (novo, 30/15 min). Qualquer outra rota em `/store/*` ou `/admin/*` cai no roteador admin (negado por padrão).
+  * Frontend: [js/admin/app.js](js/admin/app.js) detecta o modo (servidor → login real; sem API → demonstração com PIN), envia CSRF via `store.setAdminCsrfToken`, trata sessão expirada (`tp:admin-expired`) e apaga os pedidos do `localStorage` no logout. [js/order.js](js/order.js) consulta o servidor com código + 4 últimos dígitos do telefone.
+* **Performance do `.ZIP`:** [server/zip.mjs](server/zip.mjs) reescrito em streaming (bit 3 + data descriptor, `Content-Length` previsto, `zlib.crc32`, leitura antecipada de 2). [server/db.mjs](server/db.mjs) `getOrderZipManifestInPg` (3 consultas em paralelo, filtra `expires_at > NOW()` em vez de rodar o expurgo global) e leitura em lotes base64 de até 16 MB (1º lote de 1 MB). O download individual também deixou de rodar o expurgo global. Pool com `idleTimeoutMillis` de 5 min.
+  * Medido: pedido real de 10 fotos com 1º byte em ~1,9 s (antes ~2,6 a 3,6 s só no fim); pedido sintético de 96 MB com 5,5x menos CPU e 3,4x menos memória. Detalhes em [docs/relatorio-auditoria.md](docs/relatorio-auditoria.md) (Rodada 03).
+  * **Armadilha registrada:** `pg` 8 com `binary: true` **corrompe BYTEA** (o `pg-protocol` lê a coluna como texto UTF-8). Usar `encode(file_data,'base64')`.
+* **Correções de UI:** travessões removidos de [js/admin/app.js](js/admin/app.js), [js/product.js](js/product.js) e [termo-lgpd.html](termo-lgpd.html); regra CSS `.admin-lock form[hidden]` em `css/admin.css`.
+* **Testes:** 13/13 passando. Novos 0c (14 rotas sem sessão → 401, login, cookie, CSRF, 429) e 0d (rastreio), Teste 8 agora autenticado, conferindo bytes e CRC-32 dentro do `.ZIP` e foto vencida fora do pacote. Teste de ponta a ponta no navegador: login, ZIP, logout e modo demonstração estático.
+* **Auditoria:** 🔴 REPROVADO para produção real por pendências **anteriores** a esta rodada (V7 valor do pedido vindo do cliente; TLS `rejectUnauthorized: false`). Os bloqueadores desta rodada foram fechados.
+
+### [LOG-011] Status do Pedido Sincronizado do Painel para a Cliente
+* **Problema relatado:** ao mudar a etapa no painel, a cliente continuava vendo a etapa antiga. O banco era atualizado (`PATCH /api/v1/store/orders/status`), mas `pedido.html` e `minha-conta.html` liam só a cópia do `localStorage` da cliente. Antes do LOG-010 a cópia era renovada pelo snapshot público, que também vazava os pedidos de todas as clientes.
+* **Correção:**
+  * `GET /api/v1/me/orders` (sessão de cliente; só pedidos com `user_id` da própria conta, máx. 50) em [server/auth-routes.mjs](server/auth-routes.mjs) + `getUserOrdersInPg` em [server/db.mjs](server/db.mjs).
+  * [js/order.js](js/order.js): ao abrir o pedido, a cada 60 s com a aba visível e ao voltar para a aba, consulta `/track` com os 4 últimos dígitos do telefone da cópia local e atualiza status e linha do tempo. Com o servidor respondendo, o botão "Simular confirmação do pagamento" some (só o ateliê muda etapas).
+  * [js/store.js](js/store.js) `mergeServerOrders()`: o servidor é a fonte da verdade; da etapa "Pago" em diante o pagamento aparece como aprovado.
+  * [js/my-account.js](js/my-account.js): lista pedidos da conta vindos do servidor (mesmo se o e-mail do checkout for outro) + os deste navegador.
+* **Testes:** 14/14 (novo 4b: `/me/orders` exige login e só devolve pedidos da própria conta). Verificado no navegador: cópia local "Aguardando pagamento" virou "Em produção" e "PIX (aprovado)" sozinha.
+
+---
+
+## ✅ Checklist de Pendências (ordem de prioridade)
+- [ ] 🔴 Recalcular preço, desconto e frete no servidor em `POST /api/v1/store/orders` (veto V7).
+- [ ] 🔴 TLS do Postgres com o CA do Supabase (`ssl: { ca }`) em `server/pg-pool.mjs`.
+- [ ] 🔴 `APP_SECRET_HEX` no `.env` de produção (hoje a chave do CPF fica em `data/.secret_key`).
+- [x] 🟡 Configurar `ADMIN_EMAIL` e `ADMIN_PASSWORD_HASH` no `.env` local: `npm run admin:hash` agora pede e-mail e senha e grava direto no `.env`.
+- [ ] 🟡 Código de pedido gerado no servidor e não sequencial.
+- [x] 🟡 `GET /api/v1/me/orders` para "Minha conta" listar pedidos de qualquer aparelho (LOG-011).
+- [ ] 🟡 Vincular upload de foto a um token do carrinho.
+- [ ] 🟡 Backup com restore testado + RTO/RPO.
+- [ ] 🟡 Definir hospedagem do backend Node (servidor contínuo, por causa do keep-alive interno) para sair da demo estática.
+- [ ] 🔵 Fotos no Supabase Storage privado; MFA da admin; converter o dossiê para PDF.
+
 ---
 
 ## 🛠️ Comandos Operacionais para o Claude Code
@@ -191,7 +238,10 @@ npm test
 # 3. Disparar batimento manual de Keep-Alive no Supabase
 npm run keep-alive
 
-# 4. Iniciar o servidor Node.js
+# 4. Configurar o login do painel (pede e-mail e senha e grava no .env)
+npm run admin:hash
+
+# 5. Iniciar o servidor Node.js
 npm start # ou node server.mjs (porta padrão 8080)
 ```
 
@@ -201,4 +251,6 @@ npm start # ou node server.mjs (porta padrão 8080)
 1. **Segurança de Credenciais:** Nunca exiba ou commite o conteúdo de `.env`. O arquivo `.env` contém o `DATABASE_URL` do Supabase e as chaves de criptografia.
 2. **Tipografia e Estilo:** Nunca use travessões longos (`—` ou `–`) em textos visíveis do HTML/UI (regra de UI do projeto). Use hífen simples `-` com espaços ou barras `/`.
 3. **Persistência:** Toda e qualquer alteração de produtos, pedidos ou clientes DEVE ser feita via queries parametrizadas no PostgreSQL (`pool.query(...)`), nunca armazenando em memória ou arquivo local que se perca no deploy.
-4. **Atualização deste Log:** Sempre que concluir uma nova funcionalidade ou alteração, adicione uma entrada `[LOG-XXX]` neste arquivo `CLAUDE_HANDOVER_LOG.md`.
+4. **Atualização deste Log:** Sempre que concluir uma nova funcionalidade ou alteração, adicione uma entrada `[LOG-XXX]` neste arquivo `CLAUDE_HANDOVER_LOG.md` e atualize o checklist de pendências e o [dossiê](docs/dossie-entrega-cliente.md).
+5. **Protocolo:** seguir as skills `site-blindado` (páginas) e `arquitetura-blindada` (backend/app): plano aprovado antes de codar, revisão adversarial e auditoria ao fim de cada rodada.
+6. **Rotas novas da API:** toda rota nova em `/api/v1/store/*` é administrativa por padrão. Para torná-la pública, ela precisa ser declarada explicitamente no bloco público de `server/auth-routes.mjs`, com rate limit e sem dados pessoais.

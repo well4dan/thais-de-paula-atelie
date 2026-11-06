@@ -12,22 +12,13 @@ import {
   updateUserProfile,
   exportUserLgpdPackage,
   deleteAndAnonymizeUser,
-  getFullStoreSnapshot,
-  upsertProductInPg,
-  deleteProductInPg,
-  upsertCouponInPg,
-  deleteCouponInPg,
-  saveSettingsInPg,
+  getPublicStoreSnapshot,
+  getOrderTrackingInPg,
+  getUserOrdersInPg,
   createOrderInPg,
-  updateOrderStatusInPg,
-  resetDemoInPg,
   uploadOrderAttachmentInPg,
-  downloadOrderAttachmentInPg,
-  getOrderAttachmentsForZipInPg,
-  purgeOrderAttachmentsByOrderIdInPg,
-  runExpiredAttachmentsPurgeInPg,
 } from "./db.mjs";
-import { buildZipBuffer } from "./zip.mjs";
+import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
   validateRegistration,
@@ -36,40 +27,18 @@ import {
   LGPD_VERSION,
 } from "./validators.mjs";
 
+import {
+  checkRateLimit,
+  parseCookies,
+  sendJson,
+  readJsonBody,
+  getClientIp,
+  safeEqualStrings,
+} from "./http-utils.mjs";
+
+export { checkRateLimit, clearRateLimitsForTest } from "./http-utils.mjs";
+
 const COOKIE_NAME = "tp_session";
-const rateBuckets = new Map();
-
-export function checkRateLimit(key, limit = 10, windowMs = 15 * 60 * 1000) {
-  const now = Date.now();
-  const entry = rateBuckets.get(key);
-  if (!entry || entry.resetAt <= now) {
-    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, retryAfterSec: 0 };
-  }
-  entry.count += 1;
-  if (entry.count > limit) {
-    return { allowed: false, retryAfterSec: Math.ceil((entry.resetAt - now) / 1000) };
-  }
-  return { allowed: true, retryAfterSec: 0 };
-}
-
-export function clearRateLimitsForTest() {
-  rateBuckets.clear();
-}
-
-function parseCookies(header = "") {
-  const out = {};
-  for (const part of String(header).split(";")) {
-    const idx = part.indexOf("=");
-    if (idx > 0) {
-      const k = part.slice(0, idx).trim();
-      const v = part.slice(idx + 1).trim();
-      out[k] = decodeURIComponent(v);
-    }
-  }
-  return out;
-}
-
 function formatSessionCookie(token, maxAgeSec = 7 * 24 * 60 * 60) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   return `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
@@ -79,53 +48,10 @@ function clearSessionCookie() {
   return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
 }
 
-function sendJson(res, status, payload, extraHeaders = {}) {
-  const body = JSON.stringify(payload);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store, private",
-    ...extraHeaders,
-  });
-  res.end(body);
-}
-
-async function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    let total = 0;
-    const chunks = [];
-    req.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        reject(Object.assign(new Error("Payload muito grande."), { status: 413, code: "PAYLOAD_TOO_LARGE" }));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(Object.assign(new Error("JSON inválido na requisição."), { status: 400, code: "BAD_JSON" }));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function getClientIp(req) {
-  const xff = req.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.trim()) return xff.split(",")[0].trim();
-  return req.socket?.remoteAddress || "127.0.0.1";
-}
-
 function verifyCsrf(req, session) {
   const headerToken = req.headers["x-csrf-token"];
-  if (!headerToken || typeof headerToken !== "string" || !session?.csrfToken) return false;
-  const a = Buffer.from(headerToken);
-  const b = Buffer.from(session.csrfToken);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (typeof headerToken !== "string" || !session?.csrfToken) return false;
+  return safeEqualStrings(headerToken, session.csrfToken);
 }
 
 export async function handleApiRequest(req, res, url) {
@@ -143,9 +69,9 @@ export async function handleApiRequest(req, res, url) {
       return sendJson(res, 200, { ok: true, database: "supabase_postgres", heartbeat: beat, requestId });
     }
 
-    // 0.1 Snapshot e Sincronização da Loja com PostgreSQL
+    // 0.1 Vitrine pública (catálogo, cupons ativos e configurações públicas; sem pedidos nem dados de clientes)
     if (req.method === "GET" && url.pathname === "/api/v1/store/snapshot") {
-      const snap = await getFullStoreSnapshot();
+      const snap = await getPublicStoreSnapshot();
       return sendJson(res, 200, { ...snap, requestId });
     }
 
@@ -156,119 +82,49 @@ export async function handleApiRequest(req, res, url) {
       return sendJson(res, 201, { ok: true, requestId });
     }
 
-    if (req.method === "PATCH" && url.pathname === "/api/v1/store/orders/status") {
-      const body = await readJsonBody(req);
-      await updateOrderStatusInPg(body);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/v1/store/products") {
-      const body = await readJsonBody(req);
-      await upsertProductInPg(body.product);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "DELETE" && url.pathname === "/api/v1/store/products") {
-      const body = await readJsonBody(req);
-      await deleteProductInPg(body.id);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/v1/store/coupons") {
-      const body = await readJsonBody(req);
-      await upsertCouponInPg(body.coupon);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "DELETE" && url.pathname === "/api/v1/store/coupons") {
-      const body = await readJsonBody(req);
-      await deleteCouponInPg(body.code);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "PUT" && url.pathname === "/api/v1/store/settings") {
-      const body = await readJsonBody(req);
-      await saveSettingsInPg(body.settings);
-      return sendJson(res, 200, { ok: true, requestId });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/v1/store/reset") {
-      await resetDemoInPg();
-      const snap = await getFullStoreSnapshot();
-      return sendJson(res, 200, { ...snap, requestId });
-    }
-
-    // 0.2 Upload de Imagens Originais dos Clientes para Artes (Retenção de 7 dias no Banco)
+    // Upload das imagens originais das clientes (antes do pedido ser concluído; retenção de 7 dias)
     if (req.method === "POST" && url.pathname === "/api/v1/store/attachments") {
+      const rl = checkRateLimit(`upload:${ip}`, 60, 15 * 60 * 1000);
+      if (!rl.allowed) {
+        return sendJson(
+          res,
+          429,
+          { code: "RATE_LIMITED", message: "Muitos envios de imagem. Aguarde alguns minutos.", requestId },
+          { "Retry-After": String(rl.retryAfterSec) }
+        );
+      }
       const body = await readJsonBody(req, 12 * 1024 * 1024);
       const attachment = await uploadOrderAttachmentInPg(body);
       return sendJson(res, 201, { ok: true, attachment, requestId });
     }
 
-    // Download da Imagem Original pela Administradora (Exatamente como foi enviada)
-    const downloadMatch = url.pathname.match(/^\/api\/v1\/store\/attachments\/([0-9a-fA-F-]{36})\/download$/);
-    if (req.method === "GET" && downloadMatch) {
-      const attId = downloadMatch[1];
-      const rec = await downloadOrderAttachmentInPg(attId);
-      if (!rec) {
-        return sendJson(res, 404, { error: "Arquivo de imagem não encontrado.", requestId });
+    // Rastreio público do pedido: exige os 4 últimos dígitos do telefone informado na compra
+    const trackMatch = url.pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]{1,40})\/track$/);
+    if (req.method === "GET" && trackMatch) {
+      const rl = checkRateLimit(`track:${ip}`, 30, 15 * 60 * 1000);
+      if (!rl.allowed) {
+        return sendJson(
+          res,
+          429,
+          { code: "RATE_LIMITED", message: "Muitas consultas seguidas. Aguarde alguns minutos.", requestId },
+          { "Retry-After": String(rl.retryAfterSec) }
+        );
       }
-      if (rec.purged_at || !rec.file_data) {
-        return sendJson(res, 410, {
-          error: "Esta imagem já foi apagada automaticamente do banco (prazo de 7 dias encerrado ou exclusão manual).",
-          purgedAt: rec.purged_at,
+      const phoneLast4 = String(url.searchParams.get("phone") || "").replace(/\D+/g, "").slice(-4);
+      const tracking = phoneLast4.length === 4 ? await getOrderTrackingInPg(trackMatch[1], phoneLast4) : null;
+      if (!tracking) {
+        return sendJson(res, 404, {
+          code: "NOT_FOUND",
+          message: "Pedido não encontrado. Confira o código e os 4 últimos dígitos do telefone usado na compra.",
           requestId,
         });
       }
-      const prefix = rec.order_id ? `${rec.order_id}_` : "";
-      const downloadName = `${prefix}${rec.file_name}`.replace(/"/g, "");
-      const disposition = url.searchParams.get("inline") === "1" ? "inline" : "attachment";
-      res.writeHead(200, {
-        "Content-Type": rec.mime_type || "application/octet-stream",
-        "Content-Length": String(rec.file_data.length),
-        "Content-Disposition": `${disposition}; filename="${downloadName}"`,
-        "Cache-Control": "private, no-store",
-      });
-      res.end(rec.file_data);
-      return;
+      return sendJson(res, 200, { order: tracking, requestId });
     }
 
-    // Download de TODAS as imagens do pedido em um único arquivo .ZIP (+ LEIAME-PEDIDO.txt)
-    const zipOrderMatch = url.pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]+)\/attachments\.zip$/);
-    if (req.method === "GET" && zipOrderMatch) {
-      const orderId = zipOrderMatch[1];
-      const { files } = await getOrderAttachmentsForZipInPg(orderId);
-      if (!files.length) {
-        return sendJson(res, 410, {
-          error: "Nenhuma imagem disponível para este pedido (podem já ter sido apagadas após o prazo de 7 dias).",
-          orderId,
-          requestId,
-        });
-      }
-      const zipBuf = buildZipBuffer(files);
-      const safeZipName = `${orderId}-fotos-cliente.zip`.replace(/"/g, "");
-      res.writeHead(200, {
-        "Content-Type": "application/zip",
-        "Content-Length": String(zipBuf.length),
-        "Content-Disposition": `attachment; filename="${safeZipName}"`,
-        "Cache-Control": "private, no-store",
-      });
-      res.end(zipBuf);
-      return;
-    }
-
-    // Exclusão imediata das imagens de um pedido (pós-produção da arte)
-    const purgeOrderMatch = url.pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]+)\/attachments$/);
-    if (req.method === "DELETE" && purgeOrderMatch) {
-      const orderId = purgeOrderMatch[1];
-      const purgedCount = await purgeOrderAttachmentsByOrderIdInPg(orderId);
-      return sendJson(res, 200, { ok: true, orderId, purgedCount, requestId });
-    }
-
-    // Disparo manual ou agendado da limpeza de imagens vencidas (> 7 dias)
-    if (req.method === "POST" && url.pathname === "/api/v1/store/attachments/purge-expired") {
-      const purgedCount = await runExpiredAttachmentsPurgeInPg();
-      return sendJson(res, 200, { ok: true, purgedCount, requestId });
+    // Tudo o mais em /api/v1/store/* e /api/v1/admin/* é exclusivo da administradora (negado por padrão)
+    if (url.pathname.startsWith("/api/v1/store/") || url.pathname.startsWith("/api/v1/admin/")) {
+      return await handleAdminRequest(req, res, url, { requestId, ip, userAgent, cookies });
     }
 
     // 1. POST /api/v1/auth/register
@@ -379,6 +235,12 @@ export async function handleApiRequest(req, res, url) {
         return sendJson(res, 401, { code: "UNAUTHENTICATED", message: "Conta não encontrada.", requestId });
       }
       return sendJson(res, 200, { user, csrfToken: session.csrfToken, requestId });
+    }
+
+    // 4.1 GET /api/v1/me/orders (somente os pedidos da própria cliente)
+    if (req.method === "GET" && url.pathname === "/api/v1/me/orders") {
+      const orders = await getUserOrdersInPg(session.userId);
+      return sendJson(res, 200, { orders, requestId });
     }
 
     // Mutações exigem verificação de CSRF (Camada 8)

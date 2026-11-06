@@ -159,7 +159,6 @@ export const SETTINGS = {
   shippingFlat: 1890,
   freeShippingMin: 19900,
   readyShipDays: 2,
-  adminPin: "2611",
 };
 
 export const IMAGE_CHOICES = [

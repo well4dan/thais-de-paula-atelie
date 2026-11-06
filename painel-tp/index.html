@@ -31,21 +31,36 @@
   <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body>
-  <!-- Tela de bloqueio por PIN (apenas demonstração) -->
+  <!-- Tela de acesso: login validado no servidor; PIN apenas na demonstração estática sem servidor -->
   <section class="admin-lock" id="admin-lock">
     <div class="bezel" style="width:min(420px,100%)">
       <div class="bezel__core" style="padding:2.25rem;text-align:center">
         <span class="brand__script" style="font-size:2.4rem">Thaís de Paula</span>
         <h2 style="font-size:1.75rem;margin-top:0.25rem">Painel do Ateliê</h2>
-        <p class="muted" style="font-size:var(--t-sm);margin-top:0.35rem">Área oculta de demonstração. Digite o PIN para gerenciar pedidos, estoque e produtos.</p>
+        <p class="muted" id="lock-intro" style="font-size:var(--t-sm);margin-top:0.35rem">Verificando o acesso...</p>
 
-        <form id="pin-form" style="display:grid;gap:0.75rem;margin-top:1.5rem;text-align:left" novalidate>
+        <form id="admin-login-form" style="display:grid;gap:0.75rem;margin-top:1.5rem;text-align:left" novalidate hidden>
           <div class="field">
-            <label for="pin-input">PIN de acesso (padrão da demo: 2611)</label>
-            <input class="input" id="pin-input" type="password" inputmode="numeric" placeholder="2611" required autocomplete="off">
-            <span class="field__error" id="pin-error"></span>
+            <label for="admin-email">E-mail</label>
+            <input class="input" id="admin-email" type="email" required autocomplete="username" maxlength="160">
           </div>
-          <button class="btn btn--block btn--plain" type="submit">Entrar no painel</button>
+          <div class="field">
+            <label for="admin-password">Senha</label>
+            <input class="input" id="admin-password" type="password" required autocomplete="current-password" maxlength="200">
+            <span class="field__error" id="admin-login-error" role="alert"></span>
+          </div>
+          <button class="btn btn--block btn--plain" type="submit" id="admin-login-submit">Entrar no painel</button>
+          <a class="btn btn--ghost btn--plain btn--block" href="/">Voltar para a vitrine</a>
+        </form>
+
+        <form id="pin-form" style="display:grid;gap:0.75rem;margin-top:1.5rem;text-align:left" novalidate hidden>
+          <div class="field">
+            <label for="pin-input">PIN da demonstração</label>
+            <input class="input" id="pin-input" type="password" inputmode="numeric" required autocomplete="off">
+            <span class="field__hint">Versão de apresentação: dados fictícios, salvos só neste navegador.</span>
+            <span class="field__error" id="pin-error" role="alert"></span>
+          </div>
+          <button class="btn btn--block btn--plain" type="submit">Entrar na demonstração</button>
           <a class="btn btn--ghost btn--plain btn--block" href="/">Voltar para a vitrine</a>
         </form>
       </div>

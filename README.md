@@ -24,5 +24,6 @@ Depois acesse `http://localhost:8080`.
 - **Acompanhamento de Pedido (`/pedido.html`):** Linha do tempo do status da encomenda, botão para simular aprovação de pagamento pendente e botão para enviar o resumo direto para o WhatsApp do ateliê.
 - **Painel Admin Oculto (`/painel-tp/`):**
   - **URL:** `/painel-tp/` (sem link público no site e com cabeçalho `X-Robots-Tag: noindex, nofollow`).
-  - **PIN padrão da demonstração:** `2611`
+  - **Com o servidor Node (`npm start`):** login com e-mail e senha da administradora, validados no servidor. Configure `ADMIN_EMAIL` e `ADMIN_PASSWORD_HASH` no `.env` (o hash é gerado com `npm run admin:hash`).
+  - **Sem servidor (versão estática de demonstração, ex.: Vercel):** modo demonstração com PIN `2611` e dados fictícios salvos só no navegador.
   - **Recursos:** indicadores (faturamento simulado, pedidos, ticket médio), gráfico dos últimos 14 dias, gestão de pedidos com mudança de status em tempo real e download da foto enviada pelo cliente, cadastro/edição de produtos e estoque, cupons, configurações de frete/WhatsApp, exportação CSV e botão para restaurar os dados da demonstração.

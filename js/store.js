@@ -1,4 +1,4 @@
-// Repositório da demo sobre localStorage. Numa loja real, isto vira API + banco com RLS.
+// Repositório da loja sobre localStorage, sincronizado com a API PostgreSQL quando o servidor Node está ativo.
 
 import { LINES, PRODUCTS, COUPONS, SETTINGS } from "./data/seed.js";
 import { buildDemoOrders } from "./data/demo-orders.js";
@@ -43,26 +43,56 @@ function write(key, value) {
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
+// Token CSRF da sessão da administradora (só em memória; o cookie de sessão é HttpOnly)
+let adminCsrfToken = "";
+
+export function setAdminCsrfToken(token) {
+  adminCsrfToken = token || "";
+}
+
+// Ao sair do painel, os pedidos com dados das clientes não ficam guardados no navegador
+export function forgetAdminOrders() {
+  try {
+    localStorage.removeItem(NS + KEYS.orders);
+  } catch {
+    // Armazenamento indisponível: nada a apagar
+  }
+}
+
+function apiHeaders(method, extra = {}) {
+  const headers = { ...extra };
+  if (adminCsrfToken && method !== "GET") headers["X-CSRF-Token"] = adminCsrfToken;
+  return headers;
+}
+
+function notifyIfAdminExpired(res) {
+  if (res.status === 401 && adminCsrfToken) window.dispatchEvent(new Event("tp:admin-expired"));
+}
+
 function bgSync(url, method = "POST", body = {}) {
   if (typeof fetch !== "function") return;
   fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders(method, { "Content-Type": "application/json" }),
     credentials: "same-origin",
     body: JSON.stringify(body),
-  }).catch(() => {});
+  }).then(notifyIfAdminExpired).catch(() => {});
 }
 
-export async function pullFromPostgres() {
+// Vitrine pública recebe só catálogo, cupons e configurações; pedidos vêm apenas no snapshot da administradora
+export async function pullFromPostgres({ admin = false } = {}) {
   if (typeof fetch !== "function") return;
   try {
-    const res = await fetch("/api/v1/store/snapshot", { credentials: "same-origin" });
-    if (!res.ok) return;
+    const res = await fetch(admin ? "/api/v1/admin/snapshot" : "/api/v1/store/snapshot", { credentials: "same-origin" });
+    if (!res.ok) {
+      notifyIfAdminExpired(res);
+      return;
+    }
     const snap = await res.json();
     if (Array.isArray(snap.products) && snap.products.length) write(KEYS.products, snap.products);
     if (Array.isArray(snap.coupons) && snap.coupons.length) write(KEYS.coupons, snap.coupons);
     if (snap.settings && Object.keys(snap.settings).length) write(KEYS.settings, snap.settings);
-    if (Array.isArray(snap.orders) && snap.orders.length) write(KEYS.orders, snap.orders);
+    if (admin && Array.isArray(snap.orders)) write(KEYS.orders, snap.orders);
     write(KEYS.seeded, true);
     window.dispatchEvent(new Event("storage"));
   } catch {
@@ -81,10 +111,17 @@ export function init() {
   pullFromPostgres();
 }
 
-export function resetDemo() {
+export async function resetDemo() {
   Object.values(KEYS).forEach((k) => localStorage.removeItem(NS + k));
   init();
-  bgSync("/api/v1/store/reset", "POST", {});
+  if (!adminCsrfToken) return;
+  try {
+    const res = await fetch("/api/v1/store/reset", { method: "POST", headers: apiHeaders("POST"), credentials: "same-origin" });
+    notifyIfAdminExpired(res);
+    if (res.ok) await pullFromPostgres({ admin: true });
+  } catch {
+    // Sem servidor (demonstração estática): dados locais já restaurados
+  }
 }
 
 /* Linhas e produtos */
@@ -324,6 +361,33 @@ export function setOrderStatus(id, status, note = "") {
   return order;
 }
 
+// Atualiza a cópia local com o que o servidor sabe do pedido (status e linha do tempo mudados pelo ateliê).
+// Não dispara sincronização de volta: o servidor é a fonte da verdade.
+export function mergeServerOrders(serverOrders) {
+  const list = read(KEYS.orders, []);
+  let changed = false;
+  for (const remote of serverOrders) {
+    const local = list.find((o) => o.id === remote.id);
+    if (!local) {
+      if (remote.customer && remote.totals) {
+        list.push(remote);
+        changed = true;
+      }
+      continue;
+    }
+    if (local.status !== remote.status || (remote.history || []).length !== (local.history || []).length) {
+      local.status = remote.status;
+      local.history = remote.history || local.history;
+      if (remote.leadDays) local.leadDays = remote.leadDays;
+      const paidOrLater = STATUS_FLOW.indexOf(remote.status) >= STATUS_FLOW.indexOf("pago");
+      if (paidOrLater && local.payment) local.payment.status = "aprovado";
+      changed = true;
+    }
+  }
+  if (changed) write(KEYS.orders, list);
+  return changed;
+}
+
 export async function purgeOrderAttachments(orderId) {
   const list = read(KEYS.orders, []);
   const order = list.find((o) => o.id === orderId);
@@ -340,10 +404,12 @@ export async function purgeOrderAttachments(orderId) {
     write(KEYS.orders, list);
   }
   try {
-    await fetch(`/api/v1/store/orders/${encodeURIComponent(orderId)}/attachments`, {
+    const res = await fetch(`/api/v1/store/orders/${encodeURIComponent(orderId)}/attachments`, {
       method: "DELETE",
+      headers: apiHeaders("DELETE"),
       credentials: "same-origin",
     });
+    notifyIfAdminExpired(res);
   } catch {
     // Fallback local já atualizado
   }

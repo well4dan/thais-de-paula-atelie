@@ -24,7 +24,8 @@ export const pool = new Pool({
   connectionString,
   ssl: isLocalhost ? false : { rejectUnauthorized: false },
   max: 10,
-  idleTimeoutMillis: 30000,
+  // Conexão nova com o Supabase custa ~1 s de handshake TLS; mantê-la viva 5 min deixa o painel mais ágil
+  idleTimeoutMillis: 5 * 60 * 1000,
   connectionTimeoutMillis: 15000,
 });
 
@@ -148,20 +149,17 @@ let initializedPromise = null;
 export function ensureDatabaseReady() {
   if (!initializedPromise) {
     initializedPromise = (async () => {
-      const m002 = path.resolve(
-        process.cwd(),
-        "supabase/migrations/002_full_ecommerce_and_keepalive.sql"
-      );
-      const m003 = path.resolve(
-        process.cwd(),
-        "supabase/migrations/003_order_attachments_ttl7d.sql"
-      );
-      const sql002 = fs.readFileSync(m002, "utf8");
-      const sql003 = fs.readFileSync(m003, "utf8");
+      const migrationFiles = [
+        "002_full_ecommerce_and_keepalive.sql",
+        "003_order_attachments_ttl7d.sql",
+        "004_admin_sessions.sql",
+      ];
       const client = await pool.connect();
       try {
-        await client.query(sql002);
-        await client.query(sql003);
+        for (const file of migrationFiles) {
+          const sql = fs.readFileSync(path.resolve(process.cwd(), "supabase/migrations", file), "utf8");
+          await client.query(sql);
+        }
         await seedEcommerceIfNeeded(client);
       } finally {
         client.release();

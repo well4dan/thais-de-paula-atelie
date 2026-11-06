@@ -393,7 +393,120 @@ export async function deleteAndAnonymizeUser({ userId, password, requestId }) {
 
 /* ==================== E-COMMERCE NO POSTGRESQL ==================== */
 
-export async function getFullStoreSnapshot() {
+function mapProductRow(r) {
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    line: r.line,
+    mode: r.mode,
+    price: r.price,
+    stock: r.stock,
+    leadDays: r.lead_days,
+    featured: r.featured,
+    active: r.active,
+    image: r.image,
+    description: r.description,
+    options: r.options_json || [],
+  };
+}
+
+function mapCouponRow(c) {
+  return { code: c.code, type: c.type, value: c.value, minOrder: c.min_order, active: c.active };
+}
+
+function withoutPrivateSettings(settingsJson) {
+  const { adminPin, ...publicSettings } = settingsJson || {};
+  return publicSettings;
+}
+
+// Vitrine pública: só catálogo ativo, cupons ativos e configurações públicas. Nunca pedidos ou dados de clientes.
+export async function getPublicStoreSnapshot() {
+  await ensureDatabaseReady();
+  const [prodRes, cupRes, setRes] = await Promise.all([
+    pool.query("SELECT * FROM public.products WHERE active = TRUE ORDER BY id ASC"),
+    pool.query("SELECT * FROM public.coupons WHERE active = TRUE ORDER BY code ASC"),
+    pool.query("SELECT settings_json FROM public.store_settings WHERE id = 1"),
+  ]);
+  return {
+    products: prodRes.rows.map(mapProductRow),
+    coupons: cupRes.rows.map(mapCouponRow),
+    settings: withoutPrivateSettings(setRes.rows[0]?.settings_json),
+  };
+}
+
+// Rastreio público: exige os 4 últimos dígitos do telefone do pedido e devolve só status e itens, sem dados pessoais
+export async function getOrderTrackingInPg(orderId, phoneLast4) {
+  await ensureDatabaseReady();
+  const { rows } = await pool.query(
+    "SELECT id, customer_json, status, history_json, lead_days, created_at FROM public.orders WHERE id = $1",
+    [orderId]
+  );
+  const order = rows[0];
+  if (!order) return null;
+  const phoneDigits = String(order.customer_json?.phone || "").replace(/\D+/g, "");
+  if (phoneDigits.length < 4 || phoneDigits.slice(-4) !== phoneLast4) return null;
+
+  const { rows: items } = await pool.query(
+    "SELECT name, image, qty FROM public.order_items WHERE order_id = $1 ORDER BY id ASC",
+    [orderId]
+  );
+  return {
+    id: order.id,
+    status: order.status,
+    leadDays: order.lead_days,
+    createdAt: order.created_at instanceof Date ? order.created_at.toISOString() : order.created_at,
+    history: (order.history_json || []).map((h) => ({ at: h.at, status: h.status, note: h.note })),
+    items: items.map((it) => ({ name: it.name, image: it.image, qty: it.qty })),
+  };
+}
+
+// "Minha conta": pedidos da própria cliente logada (vínculo por user_id gravado no checkout com sessão)
+export async function getUserOrdersInPg(userId) {
+  await ensureDatabaseReady();
+  const { rows: orders } = await pool.query(
+    `SELECT id, customer_json, shipping_json, payment_json, coupon_code, totals_json, lead_days, status, history_json, created_at
+     FROM public.orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+    [userId]
+  );
+  if (!orders.length) return [];
+  const { rows: items } = await pool.query(
+    `SELECT order_id, product_id, name, image, mode, qty, unit_price, selections_json
+     FROM public.order_items WHERE order_id = ANY($1::text[]) ORDER BY id ASC`,
+    [orders.map((o) => o.id)]
+  );
+  const itemsByOrder = new Map();
+  for (const it of items) {
+    const list = itemsByOrder.get(it.order_id) || [];
+    list.push({
+      productId: it.product_id,
+      name: it.name,
+      image: it.image,
+      mode: it.mode,
+      qty: it.qty,
+      unit: it.unit_price,
+      selections: it.selections_json || {},
+      photo: null,
+    });
+    itemsByOrder.set(it.order_id, list);
+  }
+  return orders.map((o) => ({
+    id: o.id,
+    createdAt: o.created_at instanceof Date ? o.created_at.toISOString() : o.created_at,
+    customer: o.customer_json,
+    shipping: o.shipping_json,
+    payment: o.payment_json,
+    coupon: o.coupon_code,
+    items: itemsByOrder.get(o.id) || [],
+    totals: o.totals_json,
+    leadDays: o.lead_days,
+    status: o.status,
+    history: o.history_json || [],
+  }));
+}
+
+// Painel da administradora: snapshot completo (pedidos com dados de clientes). Só via rota protegida.
+export async function getAdminStoreSnapshot() {
   await ensureDatabaseReady();
   const [prodRes, cupRes, setRes, ordRes, itemRes, attRes] = await Promise.all([
     pool.query("SELECT * FROM public.products ORDER BY id ASC"),
@@ -446,29 +559,9 @@ export async function getFullStoreSnapshot() {
   }
 
   return {
-    products: prodRes.rows.map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      name: r.name,
-      line: r.line,
-      mode: r.mode,
-      price: r.price,
-      stock: r.stock,
-      leadDays: r.lead_days,
-      featured: r.featured,
-      active: r.active,
-      image: r.image,
-      description: r.description,
-      options: r.options_json || [],
-    })),
-    coupons: cupRes.rows.map((c) => ({
-      code: c.code,
-      type: c.type,
-      value: c.value,
-      minOrder: c.min_order,
-      active: c.active,
-    })),
-    settings: setRes.rows[0]?.settings_json || {},
+    products: prodRes.rows.map(mapProductRow),
+    coupons: cupRes.rows.map(mapCouponRow),
+    settings: withoutPrivateSettings(setRes.rows[0]?.settings_json),
     orders: ordRes.rows.map((o) => ({
       id: o.id,
       createdAt: o.created_at instanceof Date ? o.created_at.toISOString() : o.created_at,
@@ -673,101 +766,160 @@ export async function uploadOrderAttachmentInPg({ productId, fileName, mimeType,
   };
 }
 
-export async function downloadOrderAttachmentInPg(attachmentId) {
-  await ensureDatabaseReady();
-  await pool.query("SELECT public.purge_expired_order_images()");
+// Bytes originais trafegando em base64 (1,33x o tamanho real; o padrão hex do pg trafega 2x).
+// O modo `binary: true` do pg 8 não serve: o protocolo lê cada coluna como texto UTF-8 e corromperia a imagem.
+async function loadAttachmentsBytesInPg(attachmentIds) {
   const { rows } = await pool.query(
-    `UPDATE public.order_attachments
-     SET downloaded_at = COALESCE(downloaded_at, NOW())
-     WHERE id = $1
-     RETURNING id, order_id, product_id, file_name, mime_type, size_bytes, file_data, created_at, expires_at, purged_at`,
-    [attachmentId]
+    `SELECT id, encode(file_data, 'base64') AS file_b64 FROM public.order_attachments
+     WHERE id = ANY($1::uuid[]) AND purged_at IS NULL AND file_data IS NOT NULL AND expires_at > NOW()`,
+    [attachmentIds]
   );
-  return rows[0] || null;
+  return new Map(rows.map((r) => [String(r.id), Buffer.from(r.file_b64, "base64")]));
 }
 
-export async function getOrderAttachmentsForZipInPg(orderId) {
-  await ensureDatabaseReady();
-  await pool.query("SELECT public.purge_expired_order_images()");
+export async function loadAttachmentBytesInPg(attachmentId) {
+  return (await loadAttachmentsBytesInPg([attachmentId])).get(String(attachmentId)) || null;
+}
 
-  const { rows: ordRows } = await pool.query(
-    "SELECT id, customer_json, created_at FROM public.orders WHERE id = $1",
-    [orderId]
-  );
-  const orderRow = ordRows[0] || null;
+// Agrupa anexos em lotes de até ZIP_BATCH_BYTES por consulta: poucas idas ao banco para fotos pequenas,
+// memória limitada para fotos grandes. Cada lote é buscado uma única vez e liberado conforme é enviado.
+const ZIP_BATCH_BYTES = 16 * 1024 * 1024;
+// O 1º lote é pequeno para o download começar assim que a 1ª foto chega, enquanto os próximos vêm em paralelo
+const ZIP_FIRST_BATCH_BYTES = 1024 * 1024;
 
-  const { rows: itemRows } = await pool.query(
-    "SELECT product_id, name, qty, selections_json, photo_data FROM public.order_items WHERE order_id = $1 ORDER BY id ASC",
-    [orderId]
-  );
-
-  const { rows: attRows } = await pool.query(
-    `UPDATE public.order_attachments
-     SET downloaded_at = COALESCE(downloaded_at, NOW())
-     WHERE order_id = $1 AND purged_at IS NULL AND file_data IS NOT NULL
-     RETURNING id, product_id, file_name, mime_type, file_data, created_at, expires_at`,
-    [orderId]
-  );
-
-  const files = [];
-  let index = 1;
-
+function createBatchedLoaders(attRows) {
+  const batches = [];
+  let current = [];
+  let currentBytes = 0;
   for (const att of attRows) {
-    const idxStr = String(index).padStart(2, "0");
-    const safeName = String(att.file_name || `imagem-${idxStr}.jpg`).replace(/[^a-zA-Z0-9._-]/g, "_");
-    files.push({
-      name: `${idxStr}_${att.product_id}_${safeName}`,
-      data: att.file_data,
-    });
-    index += 1;
+    const budget = batches.length === 0 ? ZIP_FIRST_BATCH_BYTES : ZIP_BATCH_BYTES;
+    if (current.length && currentBytes + att.size_bytes > budget) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(String(att.id));
+    currentBytes += att.size_bytes;
   }
+  if (current.length) batches.push(current);
 
-  // Fallback para itens que possuem foto inline em photo_data (ex: pedidos da demo ou legado)
+  const batchOf = new Map();
+  batches.forEach((ids, index) => ids.forEach((id) => batchOf.set(id, index)));
+  const pending = new Map();
+  return (attachmentId) => {
+    const index = batchOf.get(attachmentId);
+    if (!pending.has(index)) pending.set(index, loadAttachmentsBytesInPg(batches[index]));
+    return pending.get(index).then((map) => {
+      const data = map.get(attachmentId) || null;
+      map.delete(attachmentId);
+      return data;
+    });
+  };
+}
+
+// Download individual: um anexo vencido é expurgado na hora e nunca é entregue (410), sem varrer a tabela inteira
+export async function downloadOrderAttachmentInPg(attachmentId) {
+  await ensureDatabaseReady();
+  const { rows } = await pool.query(
+    `UPDATE public.order_attachments
+     SET file_data = CASE WHEN expires_at <= NOW() THEN NULL ELSE file_data END,
+         purged_at = CASE WHEN expires_at <= NOW() AND purged_at IS NULL THEN NOW() ELSE purged_at END,
+         downloaded_at = CASE WHEN expires_at > NOW() AND file_data IS NOT NULL
+                              THEN COALESCE(downloaded_at, NOW()) ELSE downloaded_at END
+     WHERE id = $1
+     RETURNING id, order_id, file_name, mime_type, size_bytes, purged_at, (file_data IS NOT NULL) AS has_data`,
+    [attachmentId]
+  );
+  const rec = rows[0];
+  if (!rec) return null;
+  const fileData = rec.has_data && !rec.purged_at ? await loadAttachmentBytesInPg(attachmentId) : null;
+  return { ...rec, file_data: fileData };
+}
+
+function inlinePhotoEntry(item, idxStr) {
+  const extMatch = item.photo_data.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
+  const ext = extMatch ? extMatch[1].replace("jpeg", "jpg") : "jpg";
+  const data = Buffer.from(item.photo_data.replace(/^data:[^;]+;base64,/, ""), "base64");
+  return { name: `${idxStr}_${item.product_id}_foto-cliente.${ext}`, size: data.length, load: async () => data };
+}
+
+function buildLeiameEntry(orderId, orderRow, itemRows, files) {
+  const leiameText = buildLeiameText(orderId, orderRow, itemRows, files);
+  const data = Buffer.from(leiameText, "utf8");
+  return { name: `LEIAME-${orderId}.txt`, size: data.length, load: async () => data };
+}
+
+function buildLeiameText(orderId, orderRow, itemRows, files) {
+  const cust = orderRow?.customer_json || {};
+  const lines = [
+    `=============================================================`,
+    `THAÍS DE PAULA ATELIÊ - PACOTE DE IMAGENS PARA PRODUÇÃO DE ARTE`,
+    `=============================================================`,
+    `Pedido: ${orderId}`,
+    `Data do Pedido: ${orderRow?.created_at ? new Date(orderRow.created_at).toISOString() : "N/D"}`,
+    `Cliente: ${cust.name || "N/D"}`,
+    `WhatsApp: ${cust.phone || "N/D"} | E-mail: ${cust.email || "N/D"}`,
+    `Total de imagens neste pacote: ${files.length}`,
+    `-------------------------------------------------------------`,
+    `ITENS E INSTRUÇÕES DE PERSONALIZAÇÃO:`,
+    ...itemRows.map((it, i) => {
+      const opts = Object.entries(it.selections_json || {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(" | ");
+      return `${i + 1}. ${it.qty}x ${it.name} (${it.product_id})\n   Personalização: ${opts || "Sem observações"}`;
+    }),
+    `=============================================================`,
+    `Nota: As imagens são apagadas automaticamente do banco após 7 dias.`,
+  ];
+  return lines.join("\r\n");
+}
+
+/**
+ * Manifesto do .ZIP de um pedido: lista de entradas com tamanho conhecido e leitura sob demanda (1 foto por vez).
+ * Fotos vencidas (expires_at <= NOW()) nunca entram, mesmo que o expurgo agendado ainda não tenha rodado.
+ */
+export async function getOrderZipManifestInPg(orderId) {
+  await ensureDatabaseReady();
+  const [ordRes, itemRes, attRes] = await Promise.all([
+    pool.query("SELECT id, customer_json, created_at FROM public.orders WHERE id = $1", [orderId]),
+    pool.query(
+      "SELECT product_id, name, qty, selections_json, photo_data FROM public.order_items WHERE order_id = $1 ORDER BY id ASC",
+      [orderId]
+    ),
+    pool.query(
+      `UPDATE public.order_attachments
+       SET downloaded_at = COALESCE(downloaded_at, NOW())
+       WHERE order_id = $1 AND purged_at IS NULL AND file_data IS NOT NULL AND expires_at > NOW()
+       RETURNING id, product_id, file_name, size_bytes, created_at`,
+      [orderId]
+    ),
+  ]);
+  const orderRow = ordRes.rows[0] || null;
+  const itemRows = itemRes.rows;
+  const attRows = [...attRes.rows].sort((a, b) => a.created_at - b.created_at || String(a.id).localeCompare(String(b.id)));
+
+  const loadBatched = createBatchedLoaders(attRows);
+  const files = attRows.map((att, i) => {
+    const idxStr = String(i + 1).padStart(2, "0");
+    const safeName = String(att.file_name || `imagem-${idxStr}.jpg`).replace(/[^a-zA-Z0-9._-]/g, "_");
+    return {
+      name: `${idxStr}_${att.product_id}_${safeName}`,
+      size: att.size_bytes,
+      load: () => loadBatched(String(att.id)),
+    };
+  });
+
+  // Fallback para itens com foto inline em photo_data (pedidos da demo ou legado)
   if (files.length === 0) {
     for (const it of itemRows) {
       if (it.photo_data && it.photo_data.startsWith("data:image/")) {
-        const idxStr = String(index).padStart(2, "0");
-        const cleanBase64 = it.photo_data.replace(/^data:[^;]+;base64,/, "");
-        const extMatch = it.photo_data.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
-        const ext = extMatch ? extMatch[1].replace("jpeg", "jpg") : "jpg";
-        files.push({
-          name: `${idxStr}_${it.product_id}_foto-cliente.${ext}`,
-          data: Buffer.from(cleanBase64, "base64"),
-        });
-        index += 1;
+        files.push(inlinePhotoEntry(it, String(files.length + 1).padStart(2, "0")));
       }
     }
   }
 
-  if (files.length > 0) {
-    const cust = orderRow?.customer_json || {};
-    const lines = [
-      `=============================================================`,
-      `THAÍS DE PAULA ATELIÊ - PACOTE DE IMAGENS PARA PRODUÇÃO DE ARTE`,
-      `=============================================================`,
-      `Pedido: ${orderId}`,
-      `Data do Pedido: ${orderRow?.created_at ? new Date(orderRow.created_at).toISOString() : "N/D"}`,
-      `Cliente: ${cust.name || "N/D"}`,
-      `WhatsApp: ${cust.phone || "N/D"} | E-mail: ${cust.email || "N/D"}`,
-      `Total de imagens neste pacote: ${files.length}`,
-      `-------------------------------------------------------------`,
-      `ITENS E INSTRUÇÕES DE PERSONALIZAÇÃO:`,
-      ...itemRows.map((it, i) => {
-        const opts = Object.entries(it.selections_json || {})
-          .filter(([, v]) => v)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(" | ");
-        return `${i + 1}. ${it.qty}x ${it.name} (${it.product_id})\n   Personalização: ${opts || "Sem observações"}`;
-      }),
-      `=============================================================`,
-      `Nota: As imagens são apagadas automaticamente do banco após 7 dias.`,
-    ];
-    files.push({
-      name: `LEIAME-${orderId}.txt`,
-      data: Buffer.from(lines.join("\r\n"), "utf8"),
-    });
-  }
-
+  if (files.length > 0) files.push(buildLeiameEntry(orderId, orderRow, itemRows, files));
   return { orderExists: Boolean(orderRow), files };
 }
 

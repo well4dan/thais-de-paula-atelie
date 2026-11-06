@@ -4,7 +4,7 @@
 **Cliente:** Thaís de Paula Ateliê (`@thaisdepaulatelie`)  
 **WhatsApp Oficial Integrado:** `(43) 98422-1611`  
 **Slogan Oficial:** *"Transformando papel em momentos especiais."*  
-**Status do Documento:** Versão 1.0 (Em atualização contínua até a emissão final em PDF)  
+**Status do Documento:** Versão 1.1 (Em atualização contínua até a emissão final em PDF)  
 **Data da Última Atualização:** 06 de novembro de 2026  
 
 ---
@@ -48,7 +48,7 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 ### Fase 2: Loja Virtual Híbrida (`loja.html` e `produto.html`)
 1. **Catálogo Completo com 16 Produtos Iniciais (`loja.html`):**
    * Filtros instantâneos por **Modalidade** (*Todos*, *Pronta Entrega*, *Sob Demanda*), **Categoria** (as 8 linhas do ateliê), **Busca por texto** e **Ordenação** (*Destaques*, *Menor Preço*, *Maior Preço*, *Pronta Entrega Primeiro*).
-   * Badges dinâmicos de disponibilidade: indicação exata de unidades restantes na Pronta Entrega (`Últimas X un.`) ou prazo de produção no Sob Demanda (`Sob demanda · 3–5 dias`).
+   * Badges dinâmicos de disponibilidade: indicação exata de unidades restantes na Pronta Entrega (`Últimas X un.`) ou prazo de produção no Sob Demanda (`Sob demanda · 3 a 5 dias`).
 2. **Página de Produto e Estúdio de Personalização (`produto.html`):**
    * **Para itens Pronta Entrega:** Trava automática de limite máximo conforme o estoque disponível e baixa automática ao concluir o pedido.
    * **Para itens Sob Demanda:** Formulário dinâmico que coleta:
@@ -113,7 +113,7 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 1. **Trava Dupla de Aceite Obrigatório no Cadastro:**
    * O usuário só consegue concluir o cadastro após marcar explicitamente os dois termos independentes:
      1. **Termos e Condições Gerais de Uso e Compra (`termos-de-uso.html`):** Regula encomendas personalizadas, prazos de produção, regras de arrependimento (Art. 49 do CDC vs. produtos confeccionados sob medida com nome do cliente), propriedade intelectual das artes do ateliê e responsabilidades.
-     2. **Termo de Consentimento para Tratamento de Dados Pessoais — LGPD (`termo-lgpd.html`):** Detalha na forma da Lei nº 13.709/2018 a finalidade de cada dado coletado (Nome, CPF para emissão fiscal/envio, Endereço para entrega, WhatsApp para aprovação de arte), base legal, segurança e direitos do titular.
+     2. **Termo de Consentimento para Tratamento de Dados Pessoais (LGPD) (`termo-lgpd.html`):** Detalha na forma da Lei nº 13.709/2018 a finalidade de cada dado coletado (Nome, CPF para emissão fiscal/envio, Endereço para entrega, WhatsApp para aprovação de arte), base legal, segurança e direitos do titular.
    * **Registro de Prova Jurídica de Consentimento (`consent_logs`):** O banco grava a data/hora exata, versão dos termos (`v1.0-2026-11`), hash criptográfico do IP e navegador em que o cliente aceitou os termos.
 2. **Portal do Titular LGPD (`minha-conta.html`):**
    * **Edição de Dados e Endereço:** Atualização cadastral imediata (Art. 18, III da LGPD).
@@ -160,6 +160,30 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 
 ---
 
+### Fase 9: Painel Blindado no Servidor e Download Rápido das Fotos em `.ZIP`
+1. **Acesso ao painel com e-mail e senha validados no servidor:**
+   * O antigo PIN de demonstração era conferido apenas no navegador. Agora, quando o site roda com o servidor, a entrada no `/painel-tp/` exige **e-mail e senha da administradora**, conferidos no servidor.
+   * A senha nunca fica gravada em texto: o servidor guarda só uma "impressão digital" criptográfica (hash `scrypt`), gerada pelo comando `npm run admin:hash`.
+   * A sessão do painel dura **8 horas**, usa um cookie protegido (`HttpOnly` e `SameSite=Strict`), exige token anti-falsificação (CSRF) em toda alteração e bloqueia o acesso por **15 minutos** após 5 senhas erradas.
+   * Ao clicar em sair, os pedidos com dados das clientes são apagados do navegador usado.
+2. **Dados das clientes fechados para o público:**
+   * A vitrine pública recebe só catálogo, cupons ativos e configurações da loja. Pedidos, nomes, telefones, endereços e fotos ficam disponíveis **somente para a administradora logada**.
+   * Todas as ações do painel (alterar status, produtos, cupons, configurações, baixar e apagar fotos, gerar `.ZIP`) passaram a ser recusadas pelo servidor sem login.
+3. **Rastreio de pedido com confirmação do telefone (`pedido.html`):**
+   * Para consultar um pedido feito em outro aparelho, a cliente informa o código `TP-2026-XXXX` **e os 4 últimos dígitos do telefone** usado na compra. A resposta mostra apenas status, prazo e itens, sem nenhum dado pessoal.
+4. **`.ZIP` das fotos mais rápido e leve:**
+   * O download começa assim que a primeira foto sai do banco, com barra de progresso real no navegador, em vez de esperar o pacote inteiro ficar pronto.
+   * As fotos trafegam do banco em formato mais compacto (cerca de **30 a 45% menos tempo de transferência** que antes) e são buscadas em lotes, poucas de cada vez.
+   * Em um pedido grande (12 fotos de 8 MB), o servidor passou a usar **5,5 vezes menos processamento** e **3,4 vezes menos memória**.
+   * Foto com mais de 7 dias nunca entra no pacote, mesmo antes da limpeza automática rodar.
+5. **Etapas do pedido chegam sozinhas para a cliente:**
+   * Quando a Thaís muda a etapa no painel, a página do pedido da cliente se atualiza sozinha: ao abrir, a cada minuto enquanto estiver aberta e ao voltar para ela.
+   * Em **Minha conta**, a cliente logada vê todos os pedidos feitos com a conta dela, de qualquer celular ou computador, sempre com a etapa atual.
+6. **Versão de apresentação continua funcionando:**
+   * Na versão publicada só para demonstração (sem servidor), o painel abre em **modo demonstração** com PIN e dados fictícios salvos apenas no navegador.
+
+---
+
 ## 3. Mapa de Páginas e Rotas Entregues
 
 | Página / Rota | Arquivo Principal | Finalidade |
@@ -168,13 +192,13 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 | **Catálogo da Loja** | `loja.html` | Busca e filtragem de produtos a Pronta Entrega e Sob Demanda |
 | **Página de Produto** | `produto.html` | Detalhes técnicos, controle de estoque e configurador de personalização com prévia de foto |
 | **Checkout & Pedido** | `checkout.html` | Fechamento de compra, cálculo de frete, cupom e integração com WhatsApp |
-| **Rastreio de Pedido** | `pedido.html` | Consulta pública de status do pedido em 5 etapas pelo código `TP-2026-XXXX` |
+| **Rastreio de Pedido** | `pedido.html` | Consulta pública de status do pedido em 5 etapas pelo código `TP-2026-XXXX` + 4 últimos dígitos do telefone |
 | **Login & Cadastro** | `conta.html` | Criação de conta (Nome, CPF, Endereço, Senha forte) com aceite obrigatório de Termos + LGPD |
 | **Minha Conta & LGPD** | `minha-conta.html` | Painel do cliente logado, edição de endereço, portabilidade JSON e exclusão de conta |
 | **Termos de Uso** | `termos-de-uso.html` | Contrato completo de uso do site, encomendas personalizadas, trocas e direitos autorais |
 | **Termo LGPD** | `termo-lgpd.html` | Termo de Consentimento para Tratamento de Dados Pessoais (Lei nº 13.709/2018) |
 | **Política de Privacidade** | `politica-de-privacidade.html` | Diretrizes gerais de privacidade e cookies |
-| **Painel Administrativo** | `painel-tp/index.html` | Gestão restrita de pedidos, estoque, preços, cupons e relatórios CSV |
+| **Painel Administrativo** | `painel-tp/index.html` | Gestão restrita (login com e-mail e senha) de pedidos, estoque, preços, cupons, fotos das clientes e relatórios CSV |
 
 ---
 
@@ -184,14 +208,19 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
   * **500 verificações aprovadas com 0 erros bloqueantes** (HTML semântico, contraste WCAG AA, tags Open Graph, Schema.org JSON-LD `Store` + `LocalBusiness`, `sitemap.xml`, `robots.txt` e `llms.txt`).
 * **Suíte Automatizada de Segurança e Integração Supabase PostgreSQL (`tests/security-auth.test.mjs`):**
   * Teste 0: Batimento cardíaco Keep-Alive gravando no Supabase PostgreSQL (`PASS`).
-  * Teste 0b: Sincronização de catálogo, estoque e cupons via PostgreSQL (`PASS`).
+  * Teste 0b: Vitrine pública com catálogo, estoque e cupons, sem nenhum pedido ou dado de cliente (`PASS`).
+  * Teste 0c: As 13 rotas do painel recusam acesso sem login; login da administradora com cookie protegido, CSRF obrigatório e bloqueio após 5 senhas erradas (`PASS`).
+  * Teste 0d: Rastreio público exige os 4 últimos dígitos do telefone e não devolve dados pessoais (`PASS`).
   * Teste 1: Bloqueio de cadastro sem aceite dos Termos de Uso ou do Termo LGPD (`PASS`).
   * Teste 2: Rejeição de CPF inválido e senha fraca (`PASS`).
   * Teste 3: Criação de conta com criptografia AES-256-GCM do CPF, hash scrypt da senha e gravação de log LGPD no Supabase (`PASS`).
   * Teste 4: Proteção contra ataque CSRF em alterações cadastrais (`PASS`).
   * Teste 5: Atualização de endereço e exportação de pacote de portabilidade LGPD (`PASS`).
   * Teste 6: Bloqueio automático de ataque de força bruta no login com HTTP 429 (`PASS`).
+  * Teste 4b: "Minha conta" exige login e lista só os pedidos da própria cliente, com a etapa atualizada pelo ateliê (`PASS`).
   * Teste 7: Direito ao esquecimento LGPD com exclusão e anonimização no PostgreSQL (`PASS`).
+  * Teste 8: Foto original enviada pela cliente baixada byte a byte idêntica (individual e dentro do `.ZIP`, com conferência de CRC-32), foto vencida fora do pacote e expurgo após 7 dias com `HTTP 410` (`PASS`).
+  * **Resultado da última execução (06/11/2026): 14 de 14 testes aprovados, 0 falhas.**
 
 ---
 
@@ -199,9 +228,13 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 
 1. **Para gerenciar pedidos, estoque e cupons:**
    * Acesse `/painel-tp/` no navegador.
-   * Digite a senha administrativa configurada (padrão inicial: `thais2026`, podendo ser alterada na aba *Configurações* do painel).
+   * Entre com o **e-mail e a senha da administradora**. Eles são definidos pelo responsável técnico com o comando `npm run admin:hash`, e a senha não fica escrita em nenhuma tela ou arquivo do site. Para trocar a senha, peça ao responsável técnico para rodar o comando de novo.
+   * Por segurança, o painel pede login de novo a cada 8 horas e bloqueia por 15 minutos depois de 5 senhas erradas.
 2. **Quando um cliente fizer um pedido:**
    * O pedido ficará salvo automaticamente no banco de dados em nuvem (aba **Pedidos** do painel) **e** chegará formatado no seu WhatsApp `(43) 98422-1611`.
-   * Conforme você avançar na produção, basta mudar o status do pedido no painel (*Pagamento Confirmado* → *Em Produção* → *Pronto/Postado* → *Entregue*) para que o cliente acompanhe pelo link dele.
+   * Conforme você avançar na produção, basta mudar o status do pedido no painel (*Pagamento Confirmado* → *Em Produção* → *Pronto/Postado* → *Entregue*) para que o cliente acompanhe pelo link dele (com o código do pedido e os 4 últimos dígitos do telefone).
+4. **Para pegar as fotos de um pedido personalizado:**
+   * Na aba **Pedidos**, clique em **Baixar .ZIP**. O download começa na hora e traz todas as fotos originais numeradas + o arquivo `LEIAME` com as instruções de cada item.
+   * Depois de produzir a arte, clique em **Apagar imagens agora (Arte pronta)**. Se esquecer, o sistema apaga sozinho após 7 dias.
 3. **Para cadastrar ou alterar estoque de Pronta Entrega:**
    * Na aba **Produtos & Estoque**, use os botões `+1` e `-1` ou clique em **Editar** para ajustar preços, fotos e descrições. Todas as alterações são salvas diretamente no banco em nuvem do Supabase.

@@ -12,6 +12,65 @@ const STEPS = [
   { key: "enviado", label: "Enviado ou retirado" },
 ];
 
+let lookupMessage = { code: "", text: "" };
+
+function buildTimeline(status) {
+  const flowIndex = store.STATUS_FLOW.indexOf(status);
+  return h("ol", { class: "timeline", "aria-label": "Progresso do pedido" },
+    STEPS.map((st, idx) => {
+      let cls = "";
+      if (status === "cancelado") cls = "";
+      else if (idx < flowIndex || status === "concluido") cls = "is-done";
+      else if (idx === flowIndex) cls = "is-current";
+      return h("li", { class: cls }, st.label);
+    }));
+}
+
+// Pedido consultado no servidor: só status, prazo e itens (sem dados pessoais nem valores)
+function renderTracking(order) {
+  const root = clear($("#order-root"));
+  const itemsList = h("div", {}, order.items.map((it) => h("div", { class: "cart-item" },
+    h("img", { class: "cart-item__img", src: it.image, alt: "", width: 76, height: 76 }),
+    h("div", {}, h("p", { class: "cart-item__name", text: `${it.qty}x ${it.name}` })))));
+  const last = order.history[order.history.length - 1];
+  root.append(h("div", { class: "bezel" },
+    h("div", { class: "bezel__core checkout-step" },
+      h("span", { class: "tag tag--pronta", text: store.STATUS[order.status]?.label || order.status }),
+      h("h1", { class: "section-title", style: "margin-top:0.5rem", text: `Pedido ${order.id}` }),
+      h("p", { class: "muted", text: `Realizado em ${dateTime(order.createdAt)}${last?.note ? ` | ${last.note}` : ""}` }),
+      buildTimeline(order.status),
+      h("h2", { style: "font-size:1.5rem;margin:1.5rem 0 0.75rem", text: "Itens da encomenda" }),
+      itemsList)));
+}
+
+async function lookupOrder(code, phone) {
+  const phoneLast4 = String(phone || "").replace(/\D+/g, "").slice(-4);
+  if (!code) return;
+  const local = store.orderById(code);
+  if (local) {
+    history.replaceState(null, "", `/pedido.html?id=${encodeURIComponent(code)}`);
+    renderOrder(local);
+    return;
+  }
+  if (phoneLast4.length !== 4) {
+    lookupMessage = { code, text: "Informe também os 4 últimos dígitos do telefone usado na compra." };
+    renderOrder(null);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/v1/store/orders/${encodeURIComponent(code)}/track?phone=${phoneLast4}`, { credentials: "same-origin" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.order) {
+      renderTracking(data.order);
+      return;
+    }
+    lookupMessage = { code, text: data.message || "Pedido não encontrado. Confira o código e o telefone." };
+  } catch {
+    lookupMessage = { code, text: "Não foi possível consultar agora. Fale com o ateliê pelo WhatsApp." };
+  }
+  renderOrder(null);
+}
+
 function renderOrder(order) {
   const root = clear($("#order-root"));
   if (!order) {
@@ -19,29 +78,22 @@ function renderOrder(order) {
       h("div", { class: "bezel__core checkout-step empty" },
         icon("receipt"),
         h("h2", { text: "Consulte seu pedido" }),
-        h("p", { text: "Digite o código do pedido (ex.: TP-2026-0022) ou escolha o último pedido feito neste navegador." }),
+        h("p", { text: "Digite o código do pedido (ex.: TP-2026-0022) e os 4 últimos dígitos do telefone usado na compra." }),
         h("form", {
           style: "display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;margin-top:0.5rem",
           onsubmit: (e) => {
             e.preventDefault();
-            const code = $("#lookup-input").value.trim().toUpperCase();
-            if (code) location.href = `/pedido.html?id=${encodeURIComponent(code)}`;
+            lookupOrder($("#lookup-input").value.trim().toUpperCase(), $("#lookup-phone").value);
           },
         },
-          h("input", { class: "input", id: "lookup-input", type: "text", placeholder: "TP-2026-0022", style: "width:220px", "aria-label": "Código do pedido" }),
-          h("button", { class: "btn btn--plain", type: "submit" }, "Buscar pedido")))));
+          h("input", { class: "input", id: "lookup-input", type: "text", placeholder: "TP-2026-0022", style: "width:200px", maxlength: "40", value: lookupMessage.code || "", "aria-label": "Código do pedido" }),
+          h("input", { class: "input", id: "lookup-phone", type: "text", inputmode: "numeric", placeholder: "4 últimos dígitos do telefone", style: "width:220px", maxlength: "4", "aria-label": "4 últimos dígitos do telefone usado na compra" }),
+          h("button", { class: "btn btn--plain", type: "submit" }, "Buscar pedido")),
+        lookupMessage.text ? h("p", { class: "field__error", role: "alert", style: "margin-top:0.75rem", text: lookupMessage.text }) : null)));
     return;
   }
 
-  const flowIndex = store.STATUS_FLOW.indexOf(order.status);
-  const timeline = h("ol", { class: "timeline", "aria-label": "Progresso do pedido" },
-    STEPS.map((st, idx) => {
-      let cls = "";
-      if (order.status === "cancelado") cls = "";
-      else if (idx < flowIndex || order.status === "concluido") cls = "is-done";
-      else if (idx === flowIndex) cls = "is-current";
-      return h("li", { class: cls }, st.label);
-    }));
+  const timeline = buildTimeline(order.status);
 
   const itemsList = h("div", {});
   for (const it of order.items) {
@@ -67,7 +119,7 @@ function renderOrder(order) {
             h("h1", { class: "section-title", style: "margin-top:0.5rem", text: `Pedido ${order.id}` }),
             h("p", { class: "muted", text: `Realizado em ${dateTime(order.createdAt)} por ${order.customer.name}` })),
           h("div", { style: "display:flex;gap:0.6rem;flex-wrap:wrap" },
-            order.status === "aguardando" ? h("button", {
+            order.status === "aguardando" && !serverSynced ? h("button", {
               class: "btn btn--sm btn--rose", type: "button",
               onclick: () => {
                 const updated = store.setOrderStatus(order.id, "pago", "Pagamento confirmado na simulação.");
@@ -92,7 +144,39 @@ function renderOrder(order) {
             h("p", { class: "field__hint", text: order.shipping.method === "envio" ? `Entrega: ${order.shipping.street}, ${order.shipping.number} (${order.shipping.city}/${order.shipping.uf})` : "Entrega: Retirada combinada pelo WhatsApp" }))))));
 }
 
+// Status vem sempre do servidor quando ele existe: o ateliê muda as etapas no painel, não neste navegador
+let serverSynced = false;
+
+async function refreshFromServer(order) {
+  const phoneLast4 = String(order?.customer?.phone || "").replace(/\D+/g, "").slice(-4);
+  if (!order || phoneLast4.length !== 4) return;
+  try {
+    const res = await fetch(`/api/v1/store/orders/${encodeURIComponent(order.id)}/track?phone=${phoneLast4}`, { credentials: "same-origin" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.order) return;
+    serverSynced = true;
+    store.mergeServerOrders([data.order]);
+    renderOrder(store.orderById(order.id));
+  } catch {
+    // Sem servidor (demonstração estática): segue com a cópia deste navegador
+  }
+}
+
 const id = params().get("id");
 const found = id ? store.orderById(id) : store.orders()[0];
+if (!found && id) lookupMessage = { code: id, text: "" };
 renderOrder(found);
-window.addEventListener("storage", () => renderOrder(id ? store.orderById(id) : store.orders()[0]));
+refreshFromServer(found);
+
+const REFRESH_MS = 60 * 1000;
+setInterval(() => {
+  if (document.visibilityState === "visible") refreshFromServer(id ? store.orderById(id) : store.orders()[0]);
+}, REFRESH_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshFromServer(id ? store.orderById(id) : store.orders()[0]);
+});
+window.addEventListener("storage", () => {
+  const current = id ? store.orderById(id) : store.orders()[0];
+  if (current) renderOrder(current);
+});

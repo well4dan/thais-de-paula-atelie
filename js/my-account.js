@@ -9,6 +9,7 @@ import {
   logoutAccount,
   exportMyLgpdData,
   deleteMyAccount,
+  fetchMyOrders,
 } from "./auth-client.js";
 import * as store from "./store.js";
 
@@ -36,14 +37,17 @@ function populateForm(user) {
   }
 }
 
+// Pedidos vinculados à conta no servidor (mesmo se o e-mail do checkout for outro)
+const accountOrderIds = new Set();
+
 function renderMyOrders(user) {
   const wrap = clear($("#me-orders"));
   const emailLower = (user.email || "").toLowerCase();
-  const list = store.orders().filter((o) => (o.customer?.email || "").toLowerCase() === emailLower);
+  const list = store.orders().filter((o) => accountOrderIds.has(o.id) || (o.customer?.email || "").toLowerCase() === emailLower);
 
   if (!list.length) {
     wrap.append(
-      h("p", { class: "muted", text: "Você ainda não possui pedidos vinculados a este e-mail neste navegador." }),
+      h("p", { class: "muted", text: "Você ainda não possui pedidos vinculados a esta conta." }),
       h("a", { class: "btn btn--sm btn--ghost", href: "/loja.html", style: "margin-top:0.75rem" }, "Ir para a loja")
     );
     return;
@@ -71,6 +75,15 @@ async function init() {
   $("#me-greeting").textContent = `Olá, ${user.name.split(" ")[0]}!`;
   populateForm(user);
   renderMyOrders(user);
+  fetchMyOrders()
+    .then((serverOrders) => {
+      serverOrders.forEach((o) => accountOrderIds.add(o.id));
+      store.mergeServerOrders(serverOrders);
+      renderMyOrders(user);
+    })
+    .catch(() => {
+      // Sem servidor (demonstração estática): mantém os pedidos deste navegador
+    });
 
   $("#me-phone")?.addEventListener("input", (e) => { e.target.value = maskPhone(e.target.value); });
   $("#me-cep")?.addEventListener("input", (e) => { e.target.value = maskCep(e.target.value); });

@@ -1,4 +1,5 @@
-// Painel Admin Oculto (/painel-tp/): autenticação de demo por PIN, métricas, pedidos, produtos, cupons, config e CSV.
+// Painel Admin Oculto (/painel-tp/): login validado no servidor, métricas, pedidos, produtos, cupons, config e CSV.
+// Sem servidor Node (demonstração estática na Vercel) o painel entra em modo demonstração com PIN e dados fictícios locais.
 
 import { $, $$, h, icon, clear, toast } from "../dom.js";
 import { money, dateTime, slugify } from "../format.js";
@@ -7,43 +8,138 @@ import { IMAGE_CHOICES } from "../data/seed.js";
 
 store.init();
 
-const SESSION_KEY = "tp:admin-unlocked";
+const DEMO_SESSION_KEY = "tp:admin-demo-unlocked";
+const DEMO_PIN = "2611";
 let activeTab = "visao";
 let statusFilter = "todos";
+let accessMode = "checking"; // "checking" | "server" | "demo"
+let serverAuthenticated = false;
+let serverCsrfToken = "";
 
 function isUnlocked() {
-  return sessionStorage.getItem(SESSION_KEY) === "1";
+  if (accessMode === "server") return serverAuthenticated;
+  if (accessMode === "demo") {
+    try {
+      return sessionStorage.getItem(DEMO_SESSION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function syncLockScreen() {
-  const lock = $("#admin-lock");
-  const shell = $("#admin-shell");
   const ok = isUnlocked();
-  lock.hidden = ok;
-  shell.hidden = !ok;
+  $("#admin-lock").hidden = ok;
+  $("#admin-shell").hidden = !ok;
+  $("#admin-login-form").hidden = ok || accessMode !== "server";
+  $("#pin-form").hidden = ok || accessMode !== "demo";
+  const intro = {
+    checking: "Verificando o acesso...",
+    server: "Área restrita. Entre com o e-mail e a senha da administradora.",
+    demo: "Versão de demonstração. Digite o PIN para conhecer o painel.",
+  };
+  $("#lock-intro").textContent = intro[accessMode];
   if (ok) renderActiveTab();
 }
 
-$("#pin-form")?.addEventListener("submit", (e) => {
+async function startServerSession(csrfToken) {
+  serverCsrfToken = csrfToken || "";
+  store.setAdminCsrfToken(serverCsrfToken);
+  serverAuthenticated = true;
+  syncLockScreen();
+  await store.pullFromPostgres({ admin: true });
+}
+
+async function detectAccessMode() {
+  try {
+    const res = await fetch("/api/v1/admin/me", { credentials: "same-origin" });
+    const isJson = (res.headers.get("content-type") || "").includes("application/json");
+    if (res.ok && isJson) {
+      accessMode = "server";
+      await startServerSession((await res.json()).csrfToken);
+      return;
+    }
+    accessMode = isJson && (res.status === 401 || res.status === 503) ? "server" : "demo";
+  } catch {
+    accessMode = "demo";
+  }
+  syncLockScreen();
+}
+
+$("#admin-login-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const pin = ($("#pin-input")?.value || "").trim();
-  const expected = store.settings().adminPin || "2611";
-  if (pin === expected) {
-    sessionStorage.setItem(SESSION_KEY, "1");
-    $("#pin-error").textContent = "";
-    syncLockScreen();
-  } else {
-    $("#pin-error").textContent = "PIN incorreto. Na demonstração o PIN padrão é 2611.";
+  const errorEl = $("#admin-login-error");
+  const submit = $("#admin-login-submit");
+  errorEl.textContent = "";
+  submit.disabled = true;
+  try {
+    const res = await fetch("/api/v1/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ email: $("#admin-email").value.trim(), password: $("#admin-password").value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errorEl.textContent = data.message || "Não foi possível entrar. Tente novamente.";
+      return;
+    }
+    $("#admin-password").value = "";
+    await startServerSession(data.csrfToken);
+  } catch {
+    errorEl.textContent = "Sem conexão com o servidor. Tente novamente.";
+  } finally {
+    submit.disabled = false;
   }
 });
 
-$("#btn-logout")?.addEventListener("click", () => {
-  sessionStorage.removeItem(SESSION_KEY);
+$("#pin-form")?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (($("#pin-input")?.value || "").trim() === DEMO_PIN) {
+    try {
+      sessionStorage.setItem(DEMO_SESSION_KEY, "1");
+    } catch {
+      // Sem sessionStorage o acesso dura só até recarregar a página
+    }
+    $("#pin-error").textContent = "";
+    syncLockScreen();
+  } else {
+    $("#pin-error").textContent = "PIN incorreto.";
+  }
+});
+
+function lockServerSession(message) {
+  serverAuthenticated = false;
+  serverCsrfToken = "";
+  store.setAdminCsrfToken("");
+  store.forgetAdminOrders();
+  syncLockScreen();
+  if (message) $("#admin-login-error").textContent = message;
+}
+
+$("#btn-logout")?.addEventListener("click", async () => {
+  if (accessMode === "server") {
+    await fetch("/api/v1/admin/logout", {
+      method: "POST",
+      headers: { "X-CSRF-Token": serverCsrfToken },
+      credentials: "same-origin",
+    }).catch(() => {});
+    lockServerSession("");
+    return;
+  }
+  try {
+    sessionStorage.removeItem(DEMO_SESSION_KEY);
+  } catch {
+    // Nada a limpar
+  }
   syncLockScreen();
 });
 
-$("#btn-reset-demo")?.addEventListener("click", () => {
-  store.resetDemo();
+window.addEventListener("tp:admin-expired", () => lockServerSession("Sua sessão expirou. Entre novamente."));
+
+$("#btn-reset-demo")?.addEventListener("click", async () => {
+  await store.resetDemo();
   toast("Dados de demonstração restaurados!");
   renderActiveTab();
 });
@@ -200,7 +296,7 @@ function formatRemainingRetention(att, orderCreatedAt) {
     : new Date(orderCreatedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
   const diffMs = expMs - Date.now();
   if (diffMs <= 0) {
-    return "Expirada (7 dias) — será removida na próxima varredura";
+    return "Expirada (7 dias) - será removida na próxima varredura";
   }
   const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
   return `Disponível para download (apaga automaticamente em ${days} dia${days > 1 ? "s" : ""})`;
@@ -502,7 +598,6 @@ function renderSettings(view) {
             shippingFlat: Math.round(Number($("#st-ship").value) * 100),
             freeShippingMin: Math.round(Number($("#st-free").value) * 100),
             readyShipDays: Number($("#st-days").value),
-            adminPin: $("#st-pin").value.trim() || "2611",
           });
           toast("Configurações salvas!");
         },
@@ -511,10 +606,10 @@ function renderSettings(view) {
         h("div", { class: "field" }, h("label", { for: "st-days", text: "Prazo saída pronta entrega (dias úteis)" }), h("input", { class: "input", id: "st-days", type: "number", value: String(cfg.readyShipDays) })),
         h("div", { class: "field" }, h("label", { for: "st-ship", text: "Frete fixo Correios (R$)" }), h("input", { class: "input", id: "st-ship", type: "number", step: "0.10", value: (cfg.shippingFlat / 100).toFixed(2) })),
         h("div", { class: "field" }, h("label", { for: "st-free", text: "Frete grátis acima de (R$)" }), h("input", { class: "input", id: "st-free", type: "number", step: "1", value: (cfg.freeShippingMin / 100).toFixed(0) })),
-        h("div", { class: "field full" }, h("label", { for: "st-pin", text: "PIN de acesso ao painel (demonstração)" }), h("input", { class: "input", id: "st-pin", value: cfg.adminPin })),
         h("div", { class: "full" }, h("button", { class: "btn btn--plain", type: "submit" }, "Salvar configurações")))));
 }
 
 $("#admin-dialog-close")?.addEventListener("click", () => $("#admin-dialog")?.close());
 syncLockScreen();
+detectAccessMode();
 window.addEventListener("storage", () => { if (isUnlocked()) renderActiveTab(); });

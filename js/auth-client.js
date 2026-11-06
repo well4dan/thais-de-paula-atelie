@@ -43,6 +43,11 @@ export async function fetchCurrentUser({ force = false } = {}) {
   }
 }
 
+export async function fetchMyOrders() {
+  const data = await request("/api/v1/me/orders");
+  return Array.isArray(data.orders) ? data.orders : [];
+}
+
 export async function registerAccount(payload) {
   const data = await request("/api/v1/auth/register", { method: "POST", body: payload });
   cachedUser = data.user;

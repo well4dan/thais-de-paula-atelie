@@ -3,6 +3,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+// Credencial de administradora só para o teste (nunca a do .env real)
+const { hashPassword } = await import("../server/crypto.mjs");
+const TEST_ADMIN_EMAIL = "admin.teste@exemplo.com.br";
+const TEST_ADMIN_PASSWORD = `Teste-${Date.now()}-Painel9`;
+process.env.ADMIN_EMAIL = TEST_ADMIN_EMAIL;
+process.env.ADMIN_PASSWORD_HASH = hashPassword(TEST_ADMIN_PASSWORD);
+
 const { createAppServer } = await import("../server.mjs");
 const { pool, ensureDatabaseReady } = await import("../server/pg-pool.mjs");
 const { clearRateLimitsForTest } = await import("../server/auth-routes.mjs");
@@ -78,6 +85,108 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.ok(Array.isArray(body.products));
     assert.ok(body.products.length >= 16);
     assert.ok(Array.isArray(body.coupons));
+    // Vitrine pública nunca expõe pedidos, dados de clientes ou o antigo PIN
+    assert.equal(body.orders, undefined);
+    assert.equal(body.settings.adminPin, undefined);
+    assert.ok(!JSON.stringify(body).includes("customer"));
+  });
+
+  let adminCookie = "";
+  let adminCsrf = "";
+
+  await t.test("0c. Rotas da administradora negadas sem sessão, login admin com limite de tentativas e CSRF obrigatório", async () => {
+    const adminRoutes = [
+      ["GET", "/api/v1/admin/snapshot"],
+      ["GET", "/api/v1/admin/me"],
+      ["GET", "/api/v1/store/orders/TP-2026-0001/attachments.zip"],
+      ["GET", "/api/v1/store/attachments/00000000-0000-0000-0000-000000000000/download"],
+      ["PATCH", "/api/v1/store/orders/status"],
+      ["POST", "/api/v1/store/products"],
+      ["DELETE", "/api/v1/store/products"],
+      ["POST", "/api/v1/store/coupons"],
+      ["DELETE", "/api/v1/store/coupons"],
+      ["PUT", "/api/v1/store/settings"],
+      ["POST", "/api/v1/store/reset"],
+      ["DELETE", "/api/v1/store/orders/TP-2026-0001/attachments"],
+      ["POST", "/api/v1/store/attachments/purge-expired"],
+      ["GET", "/api/v1/store/rota-inexistente"],
+    ];
+    for (const [method, path] of adminRoutes) {
+      const res = await fetch(`${baseUrl}${path}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: method === "GET" ? undefined : "{}",
+      });
+      assert.equal(res.status, 401, `${method} ${path} deveria exigir sessão de admin`);
+    }
+
+    // Sessão de cliente não abre o painel (cookie tp_session não vale como tp_admin)
+    const asCustomer = await fetch(`${baseUrl}/api/v1/admin/snapshot`, { headers: { Cookie: "tp_session=" + "a".repeat(64) } });
+    assert.equal(asCustomer.status, 401);
+
+    clearRateLimitsForTest();
+    const wrong = await fetch(`${baseUrl}/api/v1/admin/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: TEST_ADMIN_EMAIL, password: "senha-errada-123" }),
+    });
+    assert.equal(wrong.status, 401);
+
+    const ok = await fetch(`${baseUrl}/api/v1/admin/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: TEST_ADMIN_EMAIL.toUpperCase(), password: TEST_ADMIN_PASSWORD }),
+    });
+    assert.equal(ok.status, 200);
+    const setCookie = ok.headers.get("set-cookie") || "";
+    assert.match(setCookie, /tp_admin=/);
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /SameSite=Strict/);
+    adminCookie = setCookie.split(";")[0];
+    adminCsrf = (await ok.json()).csrfToken;
+    assert.ok(adminCsrf);
+
+    const snap = await fetch(`${baseUrl}/api/v1/admin/snapshot`, { headers: { Cookie: adminCookie } });
+    assert.equal(snap.status, 200);
+    assert.ok(Array.isArray((await snap.json()).orders));
+
+    const noCsrf = await fetch(`${baseUrl}/api/v1/store/attachments/purge-expired`, { method: "POST", headers: { Cookie: adminCookie } });
+    assert.equal(noCsrf.status, 403);
+
+    clearRateLimitsForTest();
+    for (let i = 0; i < 5; i += 1) {
+      await fetch(`${baseUrl}/api/v1/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: TEST_ADMIN_EMAIL, password: "errada" }),
+      });
+    }
+    const blocked = await fetch(`${baseUrl}/api/v1/admin/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: TEST_ADMIN_EMAIL, password: TEST_ADMIN_PASSWORD }),
+    });
+    assert.equal(blocked.status, 429);
+    clearRateLimitsForTest();
+  });
+
+  await t.test("0d. Rastreio público exige os 4 últimos dígitos do telefone e não devolve dados pessoais", async () => {
+    const { rows } = await pool.query("SELECT id, customer_json FROM public.orders ORDER BY created_at DESC LIMIT 1");
+    const order = rows[0];
+    const last4 = String(order.customer_json.phone || "").replace(/\D+/g, "").slice(-4);
+    const wrongDigits = last4 === "0000" ? "1111" : "0000";
+
+    const wrong = await fetch(`${baseUrl}/api/v1/store/orders/${order.id}/track?phone=${wrongDigits}`);
+    assert.equal(wrong.status, 404);
+    const missing = await fetch(`${baseUrl}/api/v1/store/orders/${order.id}/track`);
+    assert.equal(missing.status, 404);
+
+    const ok = await fetch(`${baseUrl}/api/v1/store/orders/${order.id}/track?phone=${last4}`);
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.order.id, order.id);
+    const raw = JSON.stringify(body);
+    assert.ok(!raw.includes("customer") && !raw.includes(order.customer_json.phone));
   });
 
   await t.test("1. Bloqueia cadastro sem aceitar os Termos de Uso ou o Termo LGPD", async () => {
@@ -170,6 +279,28 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(res.status, 403);
   });
 
+  await t.test("4b. Minha conta lista só os pedidos da própria cliente, com status atualizado pelo ateliê", async () => {
+    const anon = await fetch(`${baseUrl}/api/v1/me/orders`);
+    assert.equal(anon.status, 401);
+
+    const orderId = `TP-TESTE-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO public.orders (id, user_id, customer_json, shipping_json, payment_json, totals_json, status, history_json)
+       VALUES ($1, $2, $3::jsonb, '{}'::jsonb, '{}'::jsonb, '{"total":1000}'::jsonb, 'producao', '[]'::jsonb)`,
+      [orderId, createdUserId, JSON.stringify({ name: VALID_PAYLOAD.name, email: TEST_EMAIL, phone: VALID_PAYLOAD.phone })]
+    );
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/me/orders`, { headers: { Cookie: sessionCookie } });
+      assert.equal(res.status, 200);
+      const { orders } = await res.json();
+      assert.ok(orders.length >= 1);
+      assert.ok(orders.every((o) => o.customer.email === TEST_EMAIL));
+      assert.equal(orders.find((o) => o.id === orderId).status, "producao");
+    } finally {
+      await pool.query("DELETE FROM public.orders WHERE id = $1", [orderId]);
+    }
+  });
+
   await t.test("5. Permite atualizar perfil com CSRF válido e exportar pacote LGPD completo", async () => {
     const resUpdate = await fetch(`${baseUrl}/api/v1/me`, {
       method: "PUT",
@@ -244,6 +375,11 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     const expectedBuffer = Buffer.from(samplePngBase64, "base64");
     const testOrderId = "TP-2026-0001";
+    // Remove sobras de execuções anteriores interrompidas deste mesmo teste
+    await pool.query(
+      "DELETE FROM public.order_attachments WHERE order_id = $1 AND file_name = 'foto-cliente-original.png'",
+      [testOrderId]
+    );
 
     const upRes = await fetch(`${baseUrl}/api/v1/store/attachments`, {
       method: "POST",
@@ -263,7 +399,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(upBody.attachment.sizeBytes, expectedBuffer.length);
 
     // Administradora faz o download individual da imagem original
-    const dlRes = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`);
+    const dlRes = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`, { headers: { Cookie: adminCookie } });
     assert.equal(dlRes.status, 200);
     assert.equal(dlRes.headers.get("content-type"), "image/png");
     assert.match(dlRes.headers.get("content-disposition") || "", /foto-cliente-original\.png/);
@@ -271,7 +407,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.ok(downloadedBuf.equals(expectedBuffer));
 
     // Administradora faz o download de TODAS as fotos do pedido em um arquivo .ZIP
-    const zipRes = await fetch(`${baseUrl}/api/v1/store/orders/${testOrderId}/attachments.zip`);
+    const zipRes = await fetch(`${baseUrl}/api/v1/store/orders/${testOrderId}/attachments.zip`, { headers: { Cookie: adminCookie } });
     assert.equal(zipRes.status, 200);
     assert.equal(zipRes.headers.get("content-type"), "application/zip");
     assert.match(zipRes.headers.get("content-disposition") || "", /TP-2026-0001-fotos-cliente\.zip/);
@@ -281,6 +417,22 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     const zipStr = zipBuf.toString("utf8");
     assert.ok(zipStr.includes("01_p-polaroide-12_foto-cliente-original.png"));
     assert.ok(zipStr.includes(`LEIAME-${testOrderId}.txt`));
+    assert.equal(Number(zipRes.headers.get("content-length")), zipBuf.length);
+    // Bytes da foto dentro do .ZIP (método STORE) idênticos aos enviados pela cliente
+    const nameLen = zipBuf.readUInt16LE(26);
+    const firstFileBytes = zipBuf.subarray(30 + nameLen, 30 + nameLen + expectedBuffer.length);
+    assert.ok(firstFileBytes.equals(expectedBuffer));
+    // Data descriptor logo após os bytes carrega o CRC-32 real
+    const { crc32 } = await import("node:zlib");
+    const descriptorAt = 30 + nameLen + expectedBuffer.length;
+    assert.equal(zipBuf.readUInt32LE(descriptorAt), 0x08074b50);
+    assert.equal(zipBuf.readUInt32LE(descriptorAt + 4), crc32(expectedBuffer));
+
+    // Foto vencida não entra no .ZIP nem no download, mesmo antes do expurgo agendado
+    await pool.query("UPDATE public.order_attachments SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1", [attId]);
+    const zipExpired = await fetch(`${baseUrl}/api/v1/store/orders/${testOrderId}/attachments.zip`, { headers: { Cookie: adminCookie } });
+    const expiredBuf = Buffer.from(await zipExpired.arrayBuffer());
+    assert.ok(!expiredBuf.toString("utf8").includes("foto-cliente-original.png"));
 
     // Simula passagem de mais de 7 dias no banco e dispara a rotina automática de expurgo
     await pool.query(
@@ -289,6 +441,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     );
     const purgeRes = await fetch(`${baseUrl}/api/v1/store/attachments/purge-expired`, {
       method: "POST",
+      headers: { Cookie: adminCookie, "X-CSRF-Token": adminCsrf },
     });
     assert.equal(purgeRes.status, 200);
 
@@ -300,10 +453,17 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(rows[0].file_data, null);
     assert.ok(rows[0].purged_at);
 
-    const dlAfter = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`);
+    const dlAfter = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`, { headers: { Cookie: adminCookie } });
     assert.equal(dlAfter.status, 410);
 
-    // Limpa registro de teste
+    // Limpa registro de teste e encerra a sessão admin
     await pool.query("DELETE FROM public.order_attachments WHERE id = $1", [attId]);
+    const logout = await fetch(`${baseUrl}/api/v1/admin/logout`, {
+      method: "POST",
+      headers: { Cookie: adminCookie, "X-CSRF-Token": adminCsrf },
+    });
+    assert.equal(logout.status, 200);
+    const afterLogout = await fetch(`${baseUrl}/api/v1/admin/snapshot`, { headers: { Cookie: adminCookie } });
+    assert.equal(afterLogout.status, 401);
   });
 });

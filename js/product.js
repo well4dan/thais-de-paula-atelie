@@ -185,7 +185,7 @@ function buildOptionField(opt) {
             }
             filesListEl.append(
               h("span", {
-                text: `✓ ${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB) — retido por 7 dias para produção`,
+                text: `✓ ${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB) - retido por 7 dias para produção`,
               })
             );
           }

@@ -177,3 +177,8 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Formulários de acesso alternados (login real x demonstração): o hidden precisa vencer o display:grid inline */
+.admin-lock form[hidden] {
+  display: none !important;
+}
