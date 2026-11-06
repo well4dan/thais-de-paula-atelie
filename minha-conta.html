@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minha Conta e Privacidade LGPD | Thaís de Paula Ateliê</title>
+  <meta name="description" content="Gerencie seus dados cadastrais, endereço completo de entrega, histórico de pedidos e direitos de privacidade LGPD na sua conta do Thaís de Paula Ateliê.">
+  <link rel="canonical" href="https://thaisdepaulaatelie.com.br/minha-conta.html">
+  <meta name="theme-color" content="#FBEDE6">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:title" content="Minha Conta e Privacidade LGPD | Thaís de Paula Ateliê">
+  <meta property="og:description" content="Gerencie seu perfil, endereço de entrega e direitos do titular LGPD.">
+  <meta property="og:url" content="https://thaisdepaulaatelie.com.br/minha-conta.html">
+  <meta property="og:image" content="https://thaisdepaulaatelie.com.br/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    "name": "Minha Conta Thaís de Paula Ateliê",
+    "url": "https://thaisdepaulaatelie.com.br/minha-conta.html"
+  }
+  </script>
+
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/overlays.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/account.css">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="site-header">
+    <div class="site-header__bar">
+      <a class="brand" href="/" aria-label="Thaís de Paula Ateliê, página inicial">
+        <span class="brand__script">Thaís de Paula</span>
+        <span class="brand__sub">ATELIÊ</span>
+      </a>
+      <div class="header-actions">
+        <a class="btn btn--sm btn--ghost" href="/loja.html">Ir para a loja</a>
+        <button class="btn btn--sm btn--ghost" id="btn-logout-account" type="button">
+          <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-logout"></use></svg>
+          <span>Sair</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="conteudo" class="section" style="padding-top:2.5rem">
+    <div class="container">
+      <h1 class="section-title" id="me-greeting">Minha conta</h1>
+      <p class="section-lead">Atualize seu endereço de entrega, acompanhe suas encomendas e gerencie sua privacidade conforme a LGPD.</p>
+
+      <div class="account-grid" style="margin-top:2rem">
+        <section class="bezel">
+          <div class="bezel__core checkout-step">
+            <h2>Meus dados e endereço de entrega</h2>
+            <form id="profile-form" class="form-grid" novalidate>
+              <div class="field full">
+                <label for="me-name">Nome completo *</label>
+                <input class="input" id="me-name" type="text" required>
+              </div>
+
+              <div class="field">
+                <label for="me-email">E-mail (identificador da conta)</label>
+                <input class="input" id="me-email" type="email" disabled>
+              </div>
+
+              <div class="field">
+                <label for="me-cpf">CPF (protegido por criptografia)</label>
+                <input class="input" id="me-cpf" type="text" disabled>
+              </div>
+
+              <div class="field full">
+                <label for="me-phone">WhatsApp com DDD *</label>
+                <input class="input" id="me-phone" type="tel" required>
+              </div>
+
+              <h3 class="auth-section-title full">Endereço completo</h3>
+
+              <div class="field">
+                <label for="me-cep">CEP *</label>
+                <input class="input" id="me-cep" type="text" inputmode="numeric" required>
+              </div>
+
+              <div class="field">
+                <label for="me-city">Cidade *</label>
+                <input class="input" id="me-city" type="text" required>
+              </div>
+
+              <div class="field full">
+                <label for="me-street">Logradouro (Rua / Avenida) *</label>
+                <input class="input" id="me-street" type="text" required>
+              </div>
+
+              <div class="field">
+                <label for="me-number">Número *</label>
+                <input class="input" id="me-number" type="text" required>
+              </div>
+
+              <div class="field">
+                <label for="me-complement">Complemento</label>
+                <input class="input" id="me-complement" type="text">
+              </div>
+
+              <div class="field">
+                <label for="me-district">Bairro *</label>
+                <input class="input" id="me-district" type="text" required>
+              </div>
+
+              <div class="field">
+                <label for="me-uf">UF *</label>
+                <input class="input" id="me-uf" type="text" maxlength="2" required>
+              </div>
+
+              <div class="full" style="margin-top:0.5rem">
+                <button class="btn btn--plain" id="profile-save" type="submit">Salvar alterações</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <div>
+          <section class="bezel">
+            <div class="bezel__core checkout-step">
+              <h2>Meus pedidos recentes</h2>
+              <div id="me-orders"></div>
+            </div>
+          </section>
+
+          <section class="bezel lgpd-card">
+            <div class="bezel__core checkout-step" style="display:grid;gap:0.9rem">
+              <h2>Central de Privacidade (LGPD)</h2>
+              <p class="field__hint">Exercite seus direitos previstos no Art. 18 da Lei nº 13.709/2018 (portabilidade, acesso aos termos aceitos e eliminação de dados).</p>
+
+              <ul id="me-consents" style="list-style:none;display:grid;gap:0.25rem"></ul>
+
+              <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+                <button class="btn btn--sm btn--ghost" id="btn-export-lgpd" type="button">
+                  <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-download"></use></svg>
+                  <span>Baixar meus dados (JSON)</span>
+                </button>
+                <button class="btn btn--sm btn--ghost" id="btn-open-delete" type="button" style="color:var(--danger)">
+                  <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-trash"></use></svg>
+                  <span>Excluir minha conta</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <dialog class="dialog" id="delete-dialog">
+    <div class="dialog__head">
+      <h2>Excluir minha conta (LGPD)</h2>
+    </div>
+    <div class="dialog__body">
+      <p class="muted" style="font-size:var(--t-sm)">Esta ação revoga seu consentimento e apaga permanentemente seu CPF criptografado, endereço e sessões ativas. Digite sua senha atual para confirmar:</p>
+      <form id="delete-form" style="display:grid;gap:0.75rem;margin-top:1rem" novalidate>
+        <div class="field">
+          <label for="del-password">Sua senha atual *</label>
+          <input class="input" id="del-password" type="password" required autocomplete="current-password">
+          <span class="field__error" id="del-error"></span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem">
+          <button class="btn btn--sm btn--ghost" id="btn-cancel-delete" type="button">Cancelar</button>
+          <button class="btn btn--sm btn--rose" type="submit">Confirmar exclusão definitiva</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-legal">
+        <span>© <span data-year>2026</span> Thaís de Paula Ateliê.</span>
+        <div style="display:flex;gap:1rem">
+          <a href="/termos-de-uso.html">Termos de Uso</a>
+          <a href="/termo-lgpd.html">Termo LGPD</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/my-account.js"></script>
+</body>
+</html>

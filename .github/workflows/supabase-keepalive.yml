@@ -1,0 +1,28 @@
+name: Supabase Keep-Alive (Anti-Pause)
+
+on:
+  schedule:
+    # Executa automaticamente a cada 2 dias às 09:15 UTC (impede a pausa de 7 dias do Supabase Free)
+    - cron: "15 9 */2 * *"
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ping Supabase PostgreSQL Keep-Alive Heartbeat
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node scripts/keep-alive.mjs github_actions_cron

@@ -43,18 +43,48 @@ function write(key, value) {
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
+function bgSync(url, method = "POST", body = {}) {
+  if (typeof fetch !== "function") return;
+  fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  }).catch(() => {});
+}
+
+export async function pullFromPostgres() {
+  if (typeof fetch !== "function") return;
+  try {
+    const res = await fetch("/api/v1/store/snapshot", { credentials: "same-origin" });
+    if (!res.ok) return;
+    const snap = await res.json();
+    if (Array.isArray(snap.products) && snap.products.length) write(KEYS.products, snap.products);
+    if (Array.isArray(snap.coupons) && snap.coupons.length) write(KEYS.coupons, snap.coupons);
+    if (snap.settings && Object.keys(snap.settings).length) write(KEYS.settings, snap.settings);
+    if (Array.isArray(snap.orders) && snap.orders.length) write(KEYS.orders, snap.orders);
+    write(KEYS.seeded, true);
+    window.dispatchEvent(new Event("storage"));
+  } catch {
+    // Fallback local
+  }
+}
+
 export function init() {
-  if (read(KEYS.seeded, false)) return;
-  write(KEYS.products, clone(PRODUCTS));
-  write(KEYS.coupons, clone(COUPONS));
-  write(KEYS.settings, clone(SETTINGS));
-  write(KEYS.orders, buildDemoOrders(PRODUCTS));
-  write(KEYS.seeded, true);
+  if (!read(KEYS.seeded, false)) {
+    write(KEYS.products, clone(PRODUCTS));
+    write(KEYS.coupons, clone(COUPONS));
+    write(KEYS.settings, clone(SETTINGS));
+    write(KEYS.orders, buildDemoOrders(PRODUCTS));
+    write(KEYS.seeded, true);
+  }
+  pullFromPostgres();
 }
 
 export function resetDemo() {
   Object.values(KEYS).forEach((k) => localStorage.removeItem(NS + k));
   init();
+  bgSync("/api/v1/store/reset", "POST", {});
 }
 
 /* Linhas e produtos */
@@ -80,13 +110,18 @@ export function saveProduct(input) {
   if (slugTaken) product.slug = `${product.slug}-${Date.now().toString(36).slice(-4)}`;
   const idx = all.findIndex((p) => p.id === product.id);
   if (idx >= 0) all[idx] = product;
-  else all.push({ ...product, id: `p${Date.now().toString(36)}` });
+  else {
+    product.id = `p${Date.now().toString(36)}`;
+    all.push(product);
+  }
   write(KEYS.products, all);
+  bgSync("/api/v1/store/products", "POST", { product });
   return product;
 }
 
 export function removeProduct(id) {
   write(KEYS.products, products({ includeInactive: true }).filter((p) => p.id !== id));
+  bgSync("/api/v1/store/products", "DELETE", { id });
 }
 
 function adjustStock(productId, delta) {
@@ -172,18 +207,23 @@ export function saveCoupon(coupon) {
   if (!/^[A-Z0-9]{3,20}$/.test(code)) throw new StoreError("invalid", "Código deve ter de 3 a 20 letras ou números.");
   if (!(coupon.value > 0) || (coupon.type === "percent" && coupon.value > 90)) throw new StoreError("invalid", "Valor de desconto inválido.");
   const list = coupons().filter((c) => c.code !== code);
-  list.push({ ...coupon, code });
+  const saved = { ...coupon, code };
+  list.push(saved);
   write(KEYS.coupons, list);
+  bgSync("/api/v1/store/coupons", "POST", { coupon: saved });
 }
 
 export function removeCoupon(code) {
   write(KEYS.coupons, coupons().filter((c) => c.code !== code));
+  bgSync("/api/v1/store/coupons", "DELETE", { code });
 }
 
 /* Configurações */
 export const settings = () => ({ ...SETTINGS, ...read(KEYS.settings, {}) });
 export function saveSettings(patch) {
-  write(KEYS.settings, { ...settings(), ...patch });
+  const next = { ...settings(), ...patch };
+  write(KEYS.settings, next);
+  bgSync("/api/v1/store/settings", "PUT", { settings: next });
 }
 
 /* Totais */
@@ -260,6 +300,7 @@ export function createOrder({ customer, shipping, payment, couponCode }) {
   }
   order.items.forEach((i) => adjustStock(i.productId, -i.qty));
   clearCart();
+  bgSync("/api/v1/store/orders", "POST", { order });
   return order;
 }
 
@@ -273,5 +314,11 @@ export function setOrderStatus(id, status, note = "") {
   order.status = status;
   order.history.push({ at: new Date().toISOString(), status, note: note || STATUS[status].label });
   write(KEYS.orders, list);
+  bgSync("/api/v1/store/orders/status", "PATCH", {
+    id: order.id,
+    status: order.status,
+    payment: order.payment,
+    history: order.history,
+  });
   return order;
 }

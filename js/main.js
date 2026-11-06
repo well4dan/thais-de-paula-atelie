@@ -3,8 +3,24 @@
 import * as store from "./store.js";
 import { initCart } from "./cart.js";
 import { initMotion } from "./motion.js";
+import { fetchCurrentUser } from "./auth-client.js";
+import { h, icon } from "./dom.js";
 
 store.init();
+
+async function initAuthHeader() {
+  const actions = document.querySelector(".header-actions");
+  if (!actions || actions.querySelector("[data-account-link]")) return;
+  const user = await fetchCurrentUser();
+  const href = user ? "/minha-conta.html" : "/conta.html";
+  const label = user ? `Minha conta (${user.name.split(" ")[0]})` : "Entrar ou criar conta";
+  const link = h(
+    "a",
+    { class: "icon-btn", href, "data-account-link": "", "aria-label": label, title: label },
+    icon("users")
+  );
+  actions.prepend(link);
+}
 
 function initMenu() {
   const toggle = document.querySelector(".menu-toggle");
@@ -44,4 +60,5 @@ initMenu();
 initDemoBar();
 initYear();
 initCart();
+initAuthHeader();
 initMotion();

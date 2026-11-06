@@ -5,6 +5,7 @@ import { money, maskPhone, maskCep, maskCard, maskExpiry, luhnValid, cardBrand, 
 import * as store from "./store.js";
 import { selectionsSummary } from "./ui.js";
 import { fakePixCode, fakeBoletoLine, renderFakeQrSvg, renderBarcode } from "./payment-sim.js";
+import { fetchCurrentUser } from "./auth-client.js";
 
 const state = {
   shippingMethod: "retirada",
@@ -221,3 +222,18 @@ $("#checkout-form")?.addEventListener("submit", (e) => {
 
 renderSummary();
 window.addEventListener("tp:cart", renderSummary);
+
+fetchCurrentUser().then((user) => {
+  if (!user) return;
+  if ($("#c-name") && !$("#c-name").value) $("#c-name").value = user.name || "";
+  if ($("#c-email") && !$("#c-email").value) $("#c-email").value = user.email || "";
+  if ($("#c-phone") && !$("#c-phone").value) $("#c-phone").value = maskPhone(user.phone || "");
+  if (user.address) {
+    if ($("#c-cep") && !$("#c-cep").value) $("#c-cep").value = user.address.cep || "";
+    if ($("#c-city") && !$("#c-city").value) $("#c-city").value = user.address.city || "";
+    if ($("#c-street") && !$("#c-street").value) $("#c-street").value = user.address.street || "";
+    if ($("#c-number") && !$("#c-number").value) $("#c-number").value = user.address.number || "";
+    if ($("#c-district") && !$("#c-district").value) $("#c-district").value = user.address.district || "";
+    if ($("#c-uf") && !$("#c-uf").value) $("#c-uf").value = user.address.uf || "PR";
+  }
+});

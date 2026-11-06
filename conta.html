@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar ou Criar Conta Segura | Thaís de Paula Ateliê</title>
+  <meta name="description" content="Acesse sua conta ou faça seu cadastro seguro no Thaís de Paula Ateliê para comprar papelaria personalizada sob demanda e itens a pronta entrega.">
+  <link rel="canonical" href="https://thaisdepaulaatelie.com.br/conta.html">
+  <meta name="theme-color" content="#FBEDE6">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:title" content="Entrar ou Criar Conta Segura | Thaís de Paula Ateliê">
+  <meta property="og:description" content="Acesse sua conta ou cadastre-se com proteção LGPD no Thaís de Paula Ateliê.">
+  <meta property="og:url" content="https://thaisdepaulaatelie.com.br/conta.html">
+  <meta property="og:image" content="https://thaisdepaulaatelie.com.br/og-image.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Entrar ou Criar Conta Thaís de Paula Ateliê",
+    "url": "https://thaisdepaulaatelie.com.br/conta.html"
+  }
+  </script>
+
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/overlays.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/account.css">
+</head>
+<body>
+  <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="site-header">
+    <div class="site-header__bar">
+      <a class="brand" href="/" aria-label="Thaís de Paula Ateliê, página inicial">
+        <span class="brand__script">Thaís de Paula</span>
+        <span class="brand__sub">ATELIÊ</span>
+      </a>
+      <div class="header-actions">
+        <a class="btn btn--sm btn--ghost" href="/loja.html">Voltar para a loja</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="conteudo" class="section" style="padding-top:2.5rem">
+    <div class="container auth-wrap">
+      <div style="text-align:center;margin-bottom:1.75rem">
+        <h1 class="section-title" style="margin-inline:auto">Sua conta no ateliê</h1>
+        <p class="section-lead" style="margin-inline:auto">Entre com seu e-mail e senha ou crie seu cadastro protegido conforme a LGPD para agilizar seus pedidos.</p>
+      </div>
+
+      <div class="auth-tabs">
+        <div class="segmented" role="tablist" aria-label="Acesso à conta">
+          <button type="button" role="tab" aria-selected="true" data-auth-tab="login">Já tenho conta (Entrar)</button>
+          <button type="button" role="tab" aria-selected="false" data-auth-tab="register">Criar meu cadastro</button>
+        </div>
+      </div>
+
+      <!-- Painel 1: Login -->
+      <section class="bezel" id="panel-login" aria-label="Entrar na conta">
+        <div class="bezel__core checkout-step">
+          <h2>Entrar na sua conta</h2>
+          <form id="login-form" class="form-grid" novalidate>
+            <div class="field full">
+              <label for="login-email">E-mail cadastrado *</label>
+              <input class="input" id="login-email" type="email" required autocomplete="email" placeholder="voce@exemplo.com.br">
+              <span class="field__error" id="err-login-email"></span>
+            </div>
+
+            <div class="field full">
+              <label for="login-password">Senha *</label>
+              <input class="input" id="login-password" type="password" required autocomplete="current-password" placeholder="Digite sua senha">
+              <span class="field__error" id="err-login-password"></span>
+            </div>
+
+            <div class="full" style="margin-top:0.5rem">
+              <button class="btn btn--block" id="login-submit" type="submit">
+                <span>Entrar com segurança</span>
+                <span class="btn__dot"><svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-lock"></use></svg></span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Painel 2: Cadastro Completo -->
+      <section class="bezel" id="panel-register" aria-label="Criar nova conta" hidden>
+        <div class="bezel__core checkout-step">
+          <h2>Criar cadastro de cliente</h2>
+          <p class="field__hint" style="margin-bottom:1.25rem">Seus dados pessoais são protegidos por criptografia (AES-256-GCM para CPF e hash scrypt para senha) em conformidade com a Lei Geral de Proteção de Dados (Lei nº 13.709/2018).</p>
+
+          <form id="register-form" class="form-grid" novalidate>
+            <!-- Honeypot anti-bot -->
+            <div class="visually-hidden" aria-hidden="true">
+              <label for="reg-website">Não preencha este campo</label>
+              <input id="reg-website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+
+            <h3 class="auth-section-title full">1. Dados pessoais</h3>
+
+            <div class="field full">
+              <label for="reg-name">Nome completo *</label>
+              <input class="input" id="reg-name" type="text" required autocomplete="name" placeholder="Ex.: Mariana Alves de Souza">
+              <span class="field__error" id="err-reg-name"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-cpf">CPF *</label>
+              <input class="input" id="reg-cpf" type="text" inputmode="numeric" required placeholder="000.000.000-00" autocomplete="off">
+              <span class="field__hint">Criptografado em repouso. Usado para nota e envio.</span>
+              <span class="field__error" id="err-reg-cpf"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-phone">WhatsApp com DDD *</label>
+              <input class="input" id="reg-phone" type="tel" required autocomplete="tel" placeholder="(43) 99999-0000">
+              <span class="field__error" id="err-reg-phone"></span>
+            </div>
+
+            <div class="field full">
+              <label for="reg-email">E-mail *</label>
+              <input class="input" id="reg-email" type="email" required autocomplete="email" placeholder="voce@exemplo.com.br">
+              <span class="field__error" id="err-reg-email"></span>
+            </div>
+
+            <h3 class="auth-section-title full">2. Endereço completo para entrega</h3>
+
+            <div class="field">
+              <label for="reg-cep">CEP *</label>
+              <input class="input" id="reg-cep" type="text" inputmode="numeric" required autocomplete="postal-code" placeholder="86000-000">
+              <span class="field__error" id="err-reg-cep"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-city">Cidade *</label>
+              <input class="input" id="reg-city" type="text" required autocomplete="address-level2" placeholder="Ex.: Londrina">
+              <span class="field__error" id="err-reg-city"></span>
+            </div>
+
+            <div class="field full">
+              <label for="reg-street">Logradouro (Rua / Avenida) *</label>
+              <input class="input" id="reg-street" type="text" required autocomplete="street-address" placeholder="Ex.: Rua das Flores">
+              <span class="field__error" id="err-reg-street"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-number">Número *</label>
+              <input class="input" id="reg-number" type="text" required placeholder="Ex.: 240">
+              <span class="field__error" id="err-reg-number"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-complement">Complemento (opcional)</label>
+              <input class="input" id="reg-complement" type="text" placeholder="Apto, bloco, casa...">
+            </div>
+
+            <div class="field">
+              <label for="reg-district">Bairro *</label>
+              <input class="input" id="reg-district" type="text" required placeholder="Ex.: Centro">
+              <span class="field__error" id="err-reg-district"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-uf">Estado (UF) *</label>
+              <select class="select" id="reg-uf" required autocomplete="address-level1">
+                <option value="PR" selected>PR - Paraná</option>
+                <option value="AC">AC - Acre</option>
+                <option value="AL">AL - Alagoas</option>
+                <option value="AP">AP - Amapá</option>
+                <option value="AM">AM - Amazonas</option>
+                <option value="BA">BA - Bahia</option>
+                <option value="CE">CE - Ceará</option>
+                <option value="DF">DF - Distrito Federal</option>
+                <option value="ES">ES - Espírito Santo</option>
+                <option value="GO">GO - Goiás</option>
+                <option value="MA">MA - Maranhão</option>
+                <option value="MT">MT - Mato Grosso</option>
+                <option value="MS">MS - Mato Grosso do Sul</option>
+                <option value="MG">MG - Minas Gerais</option>
+                <option value="PA">PA - Pará</option>
+                <option value="PB">PB - Paraíba</option>
+                <option value="PE">PE - Pernambuco</option>
+                <option value="PI">PI - Piauí</option>
+                <option value="RJ">RJ - Rio de Janeiro</option>
+                <option value="RN">RN - Rio Grande do Norte</option>
+                <option value="RS">RS - Rio Grande do Sul</option>
+                <option value="RO">RO - Rondônia</option>
+                <option value="RR">RR - Roraima</option>
+                <option value="SC">SC - Santa Catarina</option>
+                <option value="SP">SP - São Paulo</option>
+                <option value="SE">SE - Sergipe</option>
+                <option value="TO">TO - Tocantins</option>
+              </select>
+              <span class="field__error" id="err-reg-uf"></span>
+            </div>
+
+            <h3 class="auth-section-title full">3. Senha de acesso</h3>
+
+            <div class="field">
+              <label for="reg-password">Crie uma senha forte *</label>
+              <input class="input" id="reg-password" type="password" required autocomplete="new-password" placeholder="Mínimo 10 caracteres">
+              <span class="field__error" id="err-reg-password"></span>
+            </div>
+
+            <div class="field">
+              <label for="reg-password2">Confirme sua senha *</label>
+              <input class="input" id="reg-password2" type="password" required autocomplete="new-password" placeholder="Repita a senha">
+              <span class="field__error" id="err-reg-password2"></span>
+            </div>
+
+            <div class="full">
+              <ul class="pw-checklist" aria-label="Requisitos da senha">
+                <li data-pw-rule="length">10+ caracteres</li>
+                <li data-pw-rule="upper">Letra maiúscula</li>
+                <li data-pw-rule="lower">Letra minúscula</li>
+                <li data-pw-rule="digit">Número</li>
+                <li data-pw-rule="symbol">Símbolo (@, #, !, $...)</li>
+              </ul>
+            </div>
+
+            <h3 class="auth-section-title full">4. Termos de Uso e Consentimento LGPD</h3>
+
+            <div class="consent-box full">
+              <div class="field">
+                <label class="consent-item" for="reg-acceptTerms">
+                  <input id="reg-acceptTerms" type="checkbox" required>
+                  <span>Li e aceito os <a href="/termos-de-uso.html" target="_blank" rel="noopener noreferrer"><strong>Termos e Condições de Uso e Compra</strong></a> do Thaís de Paula Ateliê (incluindo as regras de produção sob demanda e pronta entrega). *</span>
+                </label>
+                <span class="field__error" id="err-reg-acceptTerms"></span>
+              </div>
+
+              <div class="field">
+                <label class="consent-item" for="reg-acceptLgpd">
+                  <input id="reg-acceptLgpd" type="checkbox" required>
+                  <span>Li e concordo com o <a href="/termo-lgpd.html" target="_blank" rel="noopener noreferrer"><strong>Termo de Consentimento para Tratamento de Dados Pessoais (LGPD)</strong></a>, autorizando a coleta e o armazenamento seguro do meu Nome, CPF e Endereço completo para execução das minhas compras. *</span>
+                </label>
+                <span class="field__error" id="err-reg-acceptLgpd"></span>
+              </div>
+            </div>
+
+            <div class="full" style="margin-top:0.75rem">
+              <button class="btn btn--block" id="reg-submit" type="submit">
+                <span>Concluir meu cadastro</span>
+                <span class="btn__dot"><svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-check"></use></svg></span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-legal">
+        <span>© <span data-year>2026</span> Thaís de Paula Ateliê.</span>
+        <div style="display:flex;gap:1rem">
+          <a href="/termos-de-uso.html">Termos de Uso</a>
+          <a href="/termo-lgpd.html">Termo LGPD</a>
+          <a href="/politica-de-privacidade.html">Política de Privacidade</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="/js/account.js"></script>
+</body>
+</html>
