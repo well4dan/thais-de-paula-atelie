@@ -23,9 +23,11 @@ import {
   resetDemoInPg,
   uploadOrderAttachmentInPg,
   downloadOrderAttachmentInPg,
+  getOrderAttachmentsForZipInPg,
   purgeOrderAttachmentsByOrderIdInPg,
   runExpiredAttachmentsPurgeInPg,
 } from "./db.mjs";
+import { buildZipBuffer } from "./zip.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
   validateRegistration,
@@ -228,6 +230,30 @@ export async function handleApiRequest(req, res, url) {
         "Cache-Control": "private, no-store",
       });
       res.end(rec.file_data);
+      return;
+    }
+
+    // Download de TODAS as imagens do pedido em um único arquivo .ZIP (+ LEIAME-PEDIDO.txt)
+    const zipOrderMatch = url.pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]+)\/attachments\.zip$/);
+    if (req.method === "GET" && zipOrderMatch) {
+      const orderId = zipOrderMatch[1];
+      const { files } = await getOrderAttachmentsForZipInPg(orderId);
+      if (!files.length) {
+        return sendJson(res, 410, {
+          error: "Nenhuma imagem disponível para este pedido (podem já ter sido apagadas após o prazo de 7 dias).",
+          orderId,
+          requestId,
+        });
+      }
+      const zipBuf = buildZipBuffer(files);
+      const safeZipName = `${orderId}-fotos-cliente.zip`.replace(/"/g, "");
+      res.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Length": String(zipBuf.length),
+        "Content-Disposition": `attachment; filename="${safeZipName}"`,
+        "Cache-Control": "private, no-store",
+      });
+      res.end(zipBuf);
       return;
     }
 

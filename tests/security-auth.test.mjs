@@ -238,16 +238,18 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(resMe.status, 401);
   });
 
-  await t.test("8. Upload de imagem original da cliente, download fiel pela administradora e exclusão automática após 7 dias", async () => {
+  await t.test("8. Upload de imagens originais da cliente, download individual e em .ZIP pela administradora e exclusão automática após 7 dias", async () => {
     // Cria um PNG 1x1 válido em bytes
     const samplePngBase64 =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     const expectedBuffer = Buffer.from(samplePngBase64, "base64");
+    const testOrderId = "TP-2026-0001";
 
     const upRes = await fetch(`${baseUrl}/api/v1/store/attachments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        orderId: testOrderId,
         productId: "p-polaroide-12",
         fileName: "foto-cliente-original.png",
         mimeType: "image/png",
@@ -260,13 +262,25 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.ok(attId);
     assert.equal(upBody.attachment.sizeBytes, expectedBuffer.length);
 
-    // Administradora faz o download da imagem original
+    // Administradora faz o download individual da imagem original
     const dlRes = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`);
     assert.equal(dlRes.status, 200);
     assert.equal(dlRes.headers.get("content-type"), "image/png");
     assert.match(dlRes.headers.get("content-disposition") || "", /foto-cliente-original\.png/);
     const downloadedBuf = Buffer.from(await dlRes.arrayBuffer());
     assert.ok(downloadedBuf.equals(expectedBuffer));
+
+    // Administradora faz o download de TODAS as fotos do pedido em um arquivo .ZIP
+    const zipRes = await fetch(`${baseUrl}/api/v1/store/orders/${testOrderId}/attachments.zip`);
+    assert.equal(zipRes.status, 200);
+    assert.equal(zipRes.headers.get("content-type"), "application/zip");
+    assert.match(zipRes.headers.get("content-disposition") || "", /TP-2026-0001-fotos-cliente\.zip/);
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    // Verifica assinatura PKZIP Local File Header (0x04034b50) e nomes dos arquivos dentro do ZIP
+    assert.equal(zipBuf.readUInt32LE(0), 0x04034b50);
+    const zipStr = zipBuf.toString("utf8");
+    assert.ok(zipStr.includes("01_p-polaroide-12_foto-cliente-original.png"));
+    assert.ok(zipStr.includes(`LEIAME-${testOrderId}.txt`));
 
     // Simula passagem de mais de 7 dias no banco e dispara a rotina automática de expurgo
     await pool.query(

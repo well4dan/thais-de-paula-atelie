@@ -148,9 +148,12 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 1. **Envio de Múltiplas Imagens em Qualidade Original (`produto.html`):**
    * Nas peças personalizadas com foto (Polaroides, Quadros Decorativos, Ímãs de Geladeira, Capas com Foto), a cliente pode anexar **uma ou várias imagens originais** (JPG, PNG ou WebP até 8 MB cada).
    * Os arquivos são enviados **exatamente como a cliente selecionou** (sem perda de nitidez para impressão gráfica) para a tabela segura `public.order_attachments` no PostgreSQL, enquanto o navegador guarda apenas uma miniatura leve para pré-visualização instantânea.
-2. **Download Fiel pela Administradora no Painel (`/painel-tp/`):**
-   * Ao abrir os detalhes do pedido no painel, a Thaís visualiza cada arquivo anexado com nome original, tamanho em KB/MB, contador de dias restantes e o botão **"Baixar arquivo original"**.
-   * Ao clicar, o sistema baixa a imagem original já renomeada com o código do pedido (`TP-2026-XXXX_nome-do-arquivo.jpg`) para facilitar a organização na pasta de produção do ateliê.
+2. **Download Fiel Individual e Pacote Completo em `.ZIP` no Painel (`/painel-tp/`):**
+   * Ao abrir os detalhes do pedido no painel (ou diretamente na tabela de pedidos), a Thaís conta com o botão **"Baixar todas as fotos (.ZIP)"**.
+   * O sistema gera instantaneamente um arquivo único `TP-2026-XXXX-fotos-cliente.zip` contendo:
+     * Todas as fotos originais numeradas em ordem (`01_...`, `02_...`);
+     * Um arquivo de texto `LEIAME-TP-2026-XXXX.txt` com o nome da cliente, WhatsApp e todas as instruções de personalização de cada item para facilitar a produção na gráfica/ateliê.
+   * Também é possível baixar cada arquivo individualmente clicando em **"Baixar arquivo original"**.
 3. **Exclusão Automática Após 7 Dias (Economia de Banco + Conformidade LGPD):**
    * **Regra Automática de 7 Dias:** A função `public.purge_expired_order_images()` no PostgreSQL verifica continuamente os pedidos e, assim que completam **7 dias**, **apaga automaticamente os arquivos pesados de imagem do banco de dados**, mantendo apenas o registro histórico do pedido.
    * **Botão "Apagar imagens agora (Arte pronta)":** Caso a Thaís já tenha baixado as fotos e produzido a peça antes dos 7 dias, ela pode clicar em um botão no próprio pedido para liberar espaço imediatamente.

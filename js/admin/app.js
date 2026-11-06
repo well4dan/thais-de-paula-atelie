@@ -163,10 +163,32 @@ function buildOrdersTable(list) {
           },
         }, Object.entries(store.STATUS).map(([k, v]) => h("option", { value: k, selected: o.status === k, text: v.label })))),
       h("td", {},
-        h("button", {
-          class: "btn btn--sm btn--ghost", type: "button",
-          onclick: () => openOrderDialog(o),
-        }, "Detalhes"))))));
+        h("div", { style: "display:flex;gap:0.4rem;flex-wrap:wrap" },
+          h("button", {
+            class: "btn btn--sm btn--ghost", type: "button",
+            onclick: () => openOrderDialog(o),
+          }, "Detalhes"),
+          orderHasActiveImages(o)
+            ? h("a", {
+                class: "btn btn--sm btn--ghost",
+                href: `/api/v1/store/orders/${encodeURIComponent(o.id)}/attachments.zip`,
+                download: `${o.id}-fotos-cliente.zip`,
+                title: "Baixar todas as fotos enviadas neste pedido em .ZIP",
+              }, icon("download"), "Baixar .ZIP")
+            : null))))));
+}
+
+function orderHasActiveImages(o) {
+  for (const it of o.items || []) {
+    if (it.photo && it.photo !== "removida" && it.photo !== "expirada_7_dias") return true;
+    if (Array.isArray(it.attachments)) {
+      for (const a of it.attachments) {
+        const expired = Boolean(a.purgedAt) || (a.expiresAt && new Date(a.expiresAt).getTime() <= Date.now());
+        if (!expired) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function formatRemainingRetention(att, orderCreatedAt) {
@@ -244,6 +266,13 @@ function openOrderDialog(o) {
   const actionsBar = h("div", { style: "margin-top:1rem;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0.75rem" },
     h("strong", { text: `Total: ${money(o.totals.total)} (${o.payment.method.toUpperCase()})` }),
     h("div", { style: "display:flex;flex-wrap:wrap;gap:0.5rem" },
+      hasActiveImages
+        ? h("a", {
+            class: "btn btn--sm btn--plain",
+            href: `/api/v1/store/orders/${encodeURIComponent(o.id)}/attachments.zip`,
+            download: `${o.id}-fotos-cliente.zip`,
+          }, icon("download"), "Baixar todas as fotos (.ZIP)")
+        : null,
       hasActiveImages
         ? h("button", {
             class: "btn btn--sm btn--ghost",

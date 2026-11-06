@@ -60,6 +60,7 @@
 │   ├── security.mjs                    # Criptografia AES-256-GCM, Blind Index HMAC, scrypt e CSRF
 │   ├── pg-pool.mjs                     # Pool PostgreSQL (pg) com normalização de URI e Keep-Alive
 │   ├── db.mjs                          # Camada DAL para usuários, sessões, pedidos, produtos e consentimentos
+│   ├── zip.mjs                         # Gerador nativo PKZIP (CRC-32 + STORE) sem dependências externas
 │   └── auth-routes.mjs                 # Roteador das APIs (/api/v1/auth/*, /api/v1/me/*, /api/v1/store/*, /api/v1/health/*)
 ├── scripts/
 │   └── keep-alive.mjs                  # Script CLI para disparar batimento no Supabase (`npm run keep-alive`)
@@ -162,6 +163,18 @@
   * [js/product.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/product.js): Suporte a seleção de **múltiplos arquivos originais** (`multiple: true`, até 12 imagens por item), enviando o arquivo original para o banco e salvando apenas miniatura leve no `localStorage`.
   * [js/admin/app.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/admin/app.js): No modal de detalhes do pedido em `/painel-tp/`, exibe a lista de arquivos enviados com nome original, tamanho em KB, contador regressivo de dias (`apaga automaticamente em X dias`), botão **"Baixar arquivo original"** e botão **"Apagar imagens agora (Arte pronta)"**.
 * **Testes Automatizados ([tests/security-auth.test.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/tests/security-auth.test.mjs)):** Adicionado Teste 8 validando upload original, download byte-a-byte idêntico e expurgo após 7 dias retornando `HTTP 410 Gone`.
+
+### [LOG-009] Download Unificado em .ZIP de Todas as Fotos do Pedido + Resumo de Produção
+* **Ação:** Implementação da opção **"Baixar todas as fotos (.ZIP)"** para a administradora no Painel (`/painel-tp/`), facilitando a produção de kits (ex: Kit Polaroides, Kit Ímãs, Cadernos com várias fotos).
+* **Gerador PKZIP Nativo ([server/zip.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/zip.mjs)):**
+  * Implementação pura em Node.js (`Buffer` + `CRC-32` + método `STORE` sem perda de qualidade e `0 dependências externas`).
+  * Empacota todas as imagens ativas do pedido numeradas sequencialmente (`01_<produto>_<nome-original>.ext`, `02_...`) + um arquivo `LEIAME-<PEDIDO>.txt` contendo os dados do cliente e todas as instruções de personalização de cada item.
+* **Rota de API e DAL ([server/db.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/db.mjs) e [server/auth-routes.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/auth-routes.mjs)):**
+  * Função `getOrderAttachmentsForZipInPg(orderId)`: Busca todas as imagens originais de `public.order_attachments` do pedido (com fallback para `photo_data` inline se for pedido da demo), marca `downloaded_at = NOW()` e gera o `LEIAME-<PEDIDO>.txt`.
+  * Endpoint `GET /api/v1/store/orders/:orderId/attachments.zip`: Retorna o arquivo `${orderId}-fotos-cliente.zip` com `Content-Type: application/zip` ou `410 Gone` caso as imagens já tenham expirado após 7 dias.
+* **Painel Administrativo ([js/admin/app.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/admin/app.js)):**
+  * Adicionado botão rápido **"Baixar .ZIP"** diretamente na listagem da tabela de pedidos (ao lado de "Detalhes") sempre que o pedido possuir fotos ativas.
+  * Adicionado botão principal **"Baixar todas as fotos (.ZIP)"** na barra de ações do modal de detalhes do pedido.
 
 ---
 

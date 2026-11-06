@@ -686,6 +686,91 @@ export async function downloadOrderAttachmentInPg(attachmentId) {
   return rows[0] || null;
 }
 
+export async function getOrderAttachmentsForZipInPg(orderId) {
+  await ensureDatabaseReady();
+  await pool.query("SELECT public.purge_expired_order_images()");
+
+  const { rows: ordRows } = await pool.query(
+    "SELECT id, customer_json, created_at FROM public.orders WHERE id = $1",
+    [orderId]
+  );
+  const orderRow = ordRows[0] || null;
+
+  const { rows: itemRows } = await pool.query(
+    "SELECT product_id, name, qty, selections_json, photo_data FROM public.order_items WHERE order_id = $1 ORDER BY id ASC",
+    [orderId]
+  );
+
+  const { rows: attRows } = await pool.query(
+    `UPDATE public.order_attachments
+     SET downloaded_at = COALESCE(downloaded_at, NOW())
+     WHERE order_id = $1 AND purged_at IS NULL AND file_data IS NOT NULL
+     RETURNING id, product_id, file_name, mime_type, file_data, created_at, expires_at`,
+    [orderId]
+  );
+
+  const files = [];
+  let index = 1;
+
+  for (const att of attRows) {
+    const idxStr = String(index).padStart(2, "0");
+    const safeName = String(att.file_name || `imagem-${idxStr}.jpg`).replace(/[^a-zA-Z0-9._-]/g, "_");
+    files.push({
+      name: `${idxStr}_${att.product_id}_${safeName}`,
+      data: att.file_data,
+    });
+    index += 1;
+  }
+
+  // Fallback para itens que possuem foto inline em photo_data (ex: pedidos da demo ou legado)
+  if (files.length === 0) {
+    for (const it of itemRows) {
+      if (it.photo_data && it.photo_data.startsWith("data:image/")) {
+        const idxStr = String(index).padStart(2, "0");
+        const cleanBase64 = it.photo_data.replace(/^data:[^;]+;base64,/, "");
+        const extMatch = it.photo_data.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
+        const ext = extMatch ? extMatch[1].replace("jpeg", "jpg") : "jpg";
+        files.push({
+          name: `${idxStr}_${it.product_id}_foto-cliente.${ext}`,
+          data: Buffer.from(cleanBase64, "base64"),
+        });
+        index += 1;
+      }
+    }
+  }
+
+  if (files.length > 0) {
+    const cust = orderRow?.customer_json || {};
+    const lines = [
+      `=============================================================`,
+      `THAÍS DE PAULA ATELIÊ - PACOTE DE IMAGENS PARA PRODUÇÃO DE ARTE`,
+      `=============================================================`,
+      `Pedido: ${orderId}`,
+      `Data do Pedido: ${orderRow?.created_at ? new Date(orderRow.created_at).toISOString() : "N/D"}`,
+      `Cliente: ${cust.name || "N/D"}`,
+      `WhatsApp: ${cust.phone || "N/D"} | E-mail: ${cust.email || "N/D"}`,
+      `Total de imagens neste pacote: ${files.length}`,
+      `-------------------------------------------------------------`,
+      `ITENS E INSTRUÇÕES DE PERSONALIZAÇÃO:`,
+      ...itemRows.map((it, i) => {
+        const opts = Object.entries(it.selections_json || {})
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(" | ");
+        return `${i + 1}. ${it.qty}x ${it.name} (${it.product_id})\n   Personalização: ${opts || "Sem observações"}`;
+      }),
+      `=============================================================`,
+      `Nota: As imagens são apagadas automaticamente do banco após 7 dias.`,
+    ];
+    files.push({
+      name: `LEIAME-${orderId}.txt`,
+      data: Buffer.from(lines.join("\r\n"), "utf8"),
+    });
+  }
+
+  return { orderExists: Boolean(orderRow), files };
+}
+
 export async function purgeOrderAttachmentsByOrderIdInPg(orderId) {
   await ensureDatabaseReady();
   const { rowCount } = await pool.query(
