@@ -21,6 +21,10 @@ import {
   createOrderInPg,
   updateOrderStatusInPg,
   resetDemoInPg,
+  uploadOrderAttachmentInPg,
+  downloadOrderAttachmentInPg,
+  purgeOrderAttachmentsByOrderIdInPg,
+  runExpiredAttachmentsPurgeInPg,
 } from "./db.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
@@ -190,6 +194,55 @@ export async function handleApiRequest(req, res, url) {
       await resetDemoInPg();
       const snap = await getFullStoreSnapshot();
       return sendJson(res, 200, { ...snap, requestId });
+    }
+
+    // 0.2 Upload de Imagens Originais dos Clientes para Artes (Retenção de 7 dias no Banco)
+    if (req.method === "POST" && url.pathname === "/api/v1/store/attachments") {
+      const body = await readJsonBody(req, 12 * 1024 * 1024);
+      const attachment = await uploadOrderAttachmentInPg(body);
+      return sendJson(res, 201, { ok: true, attachment, requestId });
+    }
+
+    // Download da Imagem Original pela Administradora (Exatamente como foi enviada)
+    const downloadMatch = url.pathname.match(/^\/api\/v1\/store\/attachments\/([0-9a-fA-F-]{36})\/download$/);
+    if (req.method === "GET" && downloadMatch) {
+      const attId = downloadMatch[1];
+      const rec = await downloadOrderAttachmentInPg(attId);
+      if (!rec) {
+        return sendJson(res, 404, { error: "Arquivo de imagem não encontrado.", requestId });
+      }
+      if (rec.purged_at || !rec.file_data) {
+        return sendJson(res, 410, {
+          error: "Esta imagem já foi apagada automaticamente do banco (prazo de 7 dias encerrado ou exclusão manual).",
+          purgedAt: rec.purged_at,
+          requestId,
+        });
+      }
+      const prefix = rec.order_id ? `${rec.order_id}_` : "";
+      const downloadName = `${prefix}${rec.file_name}`.replace(/"/g, "");
+      const disposition = url.searchParams.get("inline") === "1" ? "inline" : "attachment";
+      res.writeHead(200, {
+        "Content-Type": rec.mime_type || "application/octet-stream",
+        "Content-Length": String(rec.file_data.length),
+        "Content-Disposition": `${disposition}; filename="${downloadName}"`,
+        "Cache-Control": "private, no-store",
+      });
+      res.end(rec.file_data);
+      return;
+    }
+
+    // Exclusão imediata das imagens de um pedido (pós-produção da arte)
+    const purgeOrderMatch = url.pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]+)\/attachments$/);
+    if (req.method === "DELETE" && purgeOrderMatch) {
+      const orderId = purgeOrderMatch[1];
+      const purgedCount = await purgeOrderAttachmentsByOrderIdInPg(orderId);
+      return sendJson(res, 200, { ok: true, orderId, purgedCount, requestId });
+    }
+
+    // Disparo manual ou agendado da limpeza de imagens vencidas (> 7 dias)
+    if (req.method === "POST" && url.pathname === "/api/v1/store/attachments/purge-expired") {
+      const purgedCount = await runExpiredAttachmentsPurgeInPg();
+      return sendJson(res, 200, { ok: true, purgedCount, requestId });
     }
 
     // 1. POST /api/v1/auth/register

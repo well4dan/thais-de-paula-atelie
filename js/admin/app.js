@@ -169,30 +169,103 @@ function buildOrdersTable(list) {
         }, "Detalhes"))))));
 }
 
+function formatRemainingRetention(att, orderCreatedAt) {
+  if (att?.purgedAt) {
+    return "Apagada do banco (ciclo de 7 dias concluído)";
+  }
+  const expMs = att?.expiresAt
+    ? new Date(att.expiresAt).getTime()
+    : new Date(orderCreatedAt).getTime() + 7 * 24 * 60 * 60 * 1000;
+  const diffMs = expMs - Date.now();
+  if (diffMs <= 0) {
+    return "Expirada (7 dias) — será removida na próxima varredura";
+  }
+  const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  return `Disponível para download (apaga automaticamente em ${days} dia${days > 1 ? "s" : ""})`;
+}
+
 function openOrderDialog(o) {
   const dlg = $("#admin-dialog");
   const body = clear($("#admin-dialog-body"));
   $("#admin-dialog-title").textContent = `Pedido ${o.id}`;
 
+  let hasActiveImages = false;
   const items = h("div", { style: "display:grid;gap:0.75rem" });
   for (const it of o.items) {
     const opts = Object.entries(it.selections || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" | ");
+    const validPhoto = it.photo && it.photo !== "removida" && it.photo !== "expirada_7_dias";
+    if (validPhoto) hasActiveImages = true;
+
+    const attBlocks = h("div", { style: "display:grid;gap:0.35rem;margin-top:0.35rem" });
+    const atts = Array.isArray(it.attachments) ? it.attachments : [];
+
+    if (atts.length > 0) {
+      for (const att of atts) {
+        const isPurged = Boolean(att.purgedAt) || (att.expiresAt && new Date(att.expiresAt).getTime() <= Date.now());
+        if (!isPurged) hasActiveImages = true;
+        const sizeKb = Math.max(1, Math.round((att.sizeBytes || 0) / 1024));
+        const retentionText = formatRemainingRetention(att, o.createdAt);
+
+        attBlocks.append(
+          h("div", { style: "display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;font-size:0.84rem" },
+            h("span", { text: `📎 ${att.fileName || "imagem.jpg"} (${sizeKb} KB) · ${retentionText}` }),
+            !isPurged && att.id
+              ? h("a", {
+                  href: `/api/v1/store/attachments/${encodeURIComponent(att.id)}/download`,
+                  download: `${o.id}_${att.fileName || "arte.jpg"}`,
+                  class: "link-btn",
+                }, "Baixar arquivo original")
+              : null
+          )
+        );
+      }
+    } else if (validPhoto) {
+      attBlocks.append(
+        h("a", {
+          href: it.photo,
+          download: `${o.id}-${it.productId}.jpg`,
+          class: "link-btn",
+        }, "Baixar foto enviada pelo cliente (expira em 7 dias)")
+      );
+    } else if (it.photo === "removida" || it.photo === "expirada_7_dias") {
+      attBlocks.append(
+        h("span", { class: "field__hint", text: "Imagem apagada do banco (prazo de 7 dias ou exclusão pós-arte)." })
+      );
+    }
+
     items.append(h("div", { class: "cart-item" },
-      h("img", { class: "cart-item__img", src: it.photo && it.photo !== "removida" ? it.photo : it.image, alt: "", width: 76, height: 76 }),
+      h("img", { class: "cart-item__img", src: validPhoto ? it.photo : it.image, alt: "", width: 76, height: 76 }),
       h("div", {},
         h("strong", { text: `${it.qty}x ${it.name}` }),
         opts ? h("p", { class: "cart-item__opts", text: `Personalização: ${opts}` }) : h("p", { class: "cart-item__opts", text: "Sem personalização (pronta entrega)" }),
-        it.photo && it.photo !== "removida" ? h("a", { href: it.photo, download: `${o.id}-${it.productId}.jpg`, class: "link-btn" }, "Baixar foto enviada pelo cliente") : null)));
+        attBlocks)));
   }
+
+  const actionsBar = h("div", { style: "margin-top:1rem;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0.75rem" },
+    h("strong", { text: `Total: ${money(o.totals.total)} (${o.payment.method.toUpperCase()})` }),
+    h("div", { style: "display:flex;flex-wrap:wrap;gap:0.5rem" },
+      hasActiveImages
+        ? h("button", {
+            class: "btn btn--sm btn--ghost",
+            type: "button",
+            onclick: async () => {
+              await store.purgeOrderAttachments(o.id);
+              toast(`Imagens do pedido ${o.id} apagadas do banco!`);
+              const refreshed = store.orderById(o.id) || o;
+              openOrderDialog(refreshed);
+              renderActiveTab();
+            },
+          }, "Apagar imagens agora (Arte pronta)")
+        : null,
+      h("a", { class: "btn btn--sm btn--ghost", href: `/pedido.html?id=${encodeURIComponent(o.id)}`, target: "_blank", rel: "noopener noreferrer" }, "Abrir visão do cliente")));
 
   body.append(
     h("p", { text: `Cliente: ${o.customer.name} (${o.customer.email} | ${o.customer.phone})` }),
     h("p", { class: "muted", style: "margin-top:0.25rem", text: o.shipping.method === "envio" ? `Envio: ${o.shipping.street}, ${o.shipping.number} - ${o.shipping.city}/${o.shipping.uf} (CEP ${o.shipping.cep})` : "Retirada combinada pelo WhatsApp" }),
+    h("p", { class: "field__hint", style: "margin-top:0.35rem", text: "Política de armazenamento: as imagens enviadas pelos clientes ficam disponíveis para download original e são apagadas automaticamente do banco após 7 dias." }),
     h("hr", { style: "border:0;border-top:1px solid var(--line);margin:1rem 0" }),
     items,
-    h("div", { style: "margin-top:1rem;display:flex;justify-content:space-between;align-items:center" },
-      h("strong", { text: `Total: ${money(o.totals.total)} (${o.payment.method.toUpperCase()})` }),
-      h("a", { class: "btn btn--sm btn--ghost", href: `/pedido.html?id=${encodeURIComponent(o.id)}`, target: "_blank", rel: "noopener noreferrer" }, "Abrir visão do cliente")));
+    actionsBar);
   dlg.showModal();
 }
 

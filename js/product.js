@@ -11,16 +11,34 @@ const product = store.productBySlug(slug) || store.products()[0];
 
 const selections = {};
 let photoData = null;
+let uploadedAttachments = [];
 let qty = 1;
 
-function resizeImageFile(file) {
+function readOriginalFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type.startsWith("image/")) {
       reject(new Error("Selecione um arquivo de imagem (JPG, PNG ou WebP)."));
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      reject(new Error("A imagem deve ter no máximo 5 MB."));
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error("Cada imagem deve ter no máximo 8 MB."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo de imagem."));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+function resizeImageFile(file, maxSide = 360) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith("image/")) {
+      reject(new Error("Selecione um arquivo de imagem (JPG, PNG ou WebP)."));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error("A imagem deve ter no máximo 8 MB."));
       return;
     }
     const reader = new FileReader();
@@ -29,7 +47,6 @@ function resizeImageFile(file) {
       const img = new Image();
       img.onerror = () => reject(new Error("Arquivo de imagem inválido."));
       img.onload = () => {
-        const maxSide = 900;
         let { width, height } = img;
         if (width > maxSide || height > maxSide) {
           if (width > height) {
@@ -45,7 +62,7 @@ function resizeImageFile(file) {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.8));
+        resolve(canvas.toDataURL("image/jpeg", 0.78));
       };
       img.src = reader.result;
     };
@@ -127,26 +144,64 @@ function buildOptionField(opt) {
 
   if (opt.type === "photo") {
     const thumb = h("img", { class: "photo-drop__thumb", src: product.image, alt: "Prévia da foto", width: 64, height: 64 });
-    const status = h("span", { class: "field__hint", text: "JPG, PNG ou WebP até 5 MB. Fica salva apenas no seu navegador." });
+    const status = h("span", {
+      class: "field__hint",
+      text: "JPG, PNG ou WebP até 8 MB (você pode selecionar 1 ou mais imagens). Os arquivos originais ficam disponíveis para produção da arte e são apagados automaticamente após 7 dias.",
+    });
+    const filesListEl = h("div", { style: "display:grid;gap:0.25rem;font-size:0.82rem;color:var(--ink-soft)" });
     const fileInput = h("input", {
-      type: "file", id: `opt-${opt.id}`, accept: "image/jpeg,image/png,image/webp",
+      type: "file",
+      id: `opt-${opt.id}`,
+      accept: "image/jpeg,image/png,image/webp",
+      multiple: true,
       onchange: async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+        const files = Array.from(e.target.files || []).slice(0, 12);
+        if (!files.length) return;
+        status.textContent = `Enviando ${files.length} arquivo(s) em qualidade original...`;
+        clear(filesListEl);
         try {
-          photoData = await resizeImageFile(file);
+          photoData = await resizeImageFile(files[0], 360);
           thumb.src = photoData;
-          status.textContent = `Foto "${file.name}" pronta!`;
+          const newAttachments = [];
+          for (const f of files) {
+            const rawBase64 = await readOriginalFileAsBase64(f);
+            try {
+              const res = await fetch("/api/v1/store/attachments", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  productId: product.id,
+                  fileName: f.name,
+                  mimeType: f.type || "image/jpeg",
+                  base64Data: rawBase64,
+                }),
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.attachment) newAttachments.push(data.attachment);
+              }
+            } catch {
+              // Mantém preview local caso offline
+            }
+            filesListEl.append(
+              h("span", {
+                text: `✓ ${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB) — retido por 7 dias para produção`,
+              })
+            );
+          }
+          uploadedAttachments = newAttachments;
+          status.textContent = `${files.length} imagem(ns) original(is) anexada(s) com sucesso!`;
           errEl.textContent = "";
           updatePriceAndPreview();
         } catch (err) {
           toast(err.message, "error");
+          status.textContent = "Erro ao anexar imagem. Tente novamente.";
         }
       },
     });
     return h("div", { class: "field" },
       h("label", { for: `opt-${opt.id}`, text: `${opt.label}${opt.required ? " *" : ""}` }),
-      h("div", { class: "photo-drop" }, thumb, h("div", { style: "display:grid;gap:0.35rem" }, fileInput, status)),
+      h("div", { class: "photo-drop" }, thumb, h("div", { style: "display:grid;gap:0.35rem" }, fileInput, status, filesListEl)),
       errEl);
   }
 
@@ -197,7 +252,13 @@ function renderProduct() {
       e.preventDefault();
       if (!validateOptions()) return;
       try {
-        store.addToCart({ productId: product.id, qty, selections: { ...selections }, photo: photoData });
+        store.addToCart({
+          productId: product.id,
+          qty,
+          selections: { ...selections },
+          photo: photoData,
+          attachments: [...uploadedAttachments],
+        });
         toast(`${product.name} adicionado ao carrinho!`);
         openCart();
       } catch (err) {

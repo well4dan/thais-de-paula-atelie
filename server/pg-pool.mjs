@@ -29,6 +29,13 @@ export const pool = new Pool({
 });
 
 export async function pingKeepAlive(source = "interval") {
+  let purgedImages = 0;
+  try {
+    const purgeRes = await pool.query("SELECT public.purge_expired_order_images() AS purged");
+    purgedImages = Number(purgeRes.rows[0]?.purged || 0);
+  } catch {
+    // Caso a migration 003 ainda esteja sendo aplicada
+  }
   const res = await pool.query(
     `INSERT INTO public.keep_alive_heartbeat (id, last_beat_at, total_beats, last_source, note)
      VALUES (1, NOW(), 1, $1, 'Thaís de Paula Ateliê - Keep Alive Ativo')
@@ -39,7 +46,7 @@ export async function pingKeepAlive(source = "interval") {
      RETURNING last_beat_at, total_beats, last_source`,
     [source]
   );
-  return res.rows[0];
+  return { ...res.rows[0], purged_images: purgedImages };
 }
 
 export async function seedEcommerceIfNeeded(client) {
@@ -141,14 +148,20 @@ let initializedPromise = null;
 export function ensureDatabaseReady() {
   if (!initializedPromise) {
     initializedPromise = (async () => {
-      const migrationPath = path.resolve(
+      const m002 = path.resolve(
         process.cwd(),
         "supabase/migrations/002_full_ecommerce_and_keepalive.sql"
       );
-      const sql = fs.readFileSync(migrationPath, "utf8");
+      const m003 = path.resolve(
+        process.cwd(),
+        "supabase/migrations/003_order_attachments_ttl7d.sql"
+      );
+      const sql002 = fs.readFileSync(m002, "utf8");
+      const sql003 = fs.readFileSync(m003, "utf8");
       const client = await pool.connect();
       try {
-        await client.query(sql);
+        await client.query(sql002);
+        await client.query(sql003);
         await seedEcommerceIfNeeded(client);
       } finally {
         client.release();

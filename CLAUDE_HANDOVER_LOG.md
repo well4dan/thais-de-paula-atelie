@@ -66,7 +66,8 @@
 ├── supabase/
 │   └── migrations/
 │       ├── 001_initial_schema.sql      # Schema inicial de teste
-│       └── 002_full_ecommerce_and_keepalive.sql # Migration definitiva (11 tabelas, RLS e índices)
+│       ├── 002_full_ecommerce_and_keepalive.sql # Migration base (11 tabelas, RLS e índices)
+│       └── 003_order_attachments_ttl7d.sql      # Cofre temporário de imagens originais dos clientes (TTL 7 dias + expurgo SQL)
 ├── tests/
 │   └── security-auth.test.mjs          # Testes automatizados oficiais (10/10 testes passando contra o Supabase)
 ├── docs/
@@ -142,7 +143,25 @@
 * **Testes Automatizados:** [tests/security-auth.test.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/tests/security-auth.test.mjs) executado e aprovado com 10/10 testes passando (`0 fail`).
 
 ### [LOG-007] Documentação e Dossiê de Entrega do Cliente
-* **Ação:** Criação do documento executivo [docs/dossie-entrega-cliente.md](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/docs/dossie-entrega-cliente.md) cobrindo as 7 fases do projeto para futura conversão em PDF e entrega final à Thaís de Paula.
+* **Ação:** Criação do documento executivo [docs/dossie-entrega-cliente.md](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/docs/dossie-entrega-cliente.md) cobrindo as fases do projeto para futura conversão em PDF e entrega final à Thaís de Paula.
+
+### [LOG-008] Cofre Temporário de Imagens dos Clientes para Artes (Download Original + Expurgo Automático em 7 Dias)
+* **Ação:** Implementação do fluxo completo de envio de arquivos originais de imagens pelos clientes, download fiel pela administradora no painel e exclusão automática do banco após 7 dias (`TTL = 7 days`).
+* **Migration Aplicada:** [supabase/migrations/003_order_attachments_ttl7d.sql](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/supabase/migrations/003_order_attachments_ttl7d.sql):
+  * Criação da tabela `public.order_attachments` (`id`, `order_id`, `product_id`, `file_name`, `mime_type`, `size_bytes`, `file_data BYTEA`, `sha256_hash`, `downloaded_at`, `created_at`, `expires_at = NOW() + INTERVAL '7 days'`, `purged_at`) com RLS ativada.
+  * Adição da coluna `attachments_json` em `public.order_items`.
+  * Criação da função PL/pgSQL `public.purge_expired_order_images()` que apaga os bytes (`file_data = NULL, purged_at = NOW()`) de imagens com `expires_at <= NOW()` (ou anexos órfãos sem pedido após 24h) e marca `photo_data = 'expirada_7_dias'` em itens de pedidos com mais de 7 dias.
+* **Integração ao Keep-Alive ([server/pg-pool.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/pg-pool.mjs)):**
+  * Toda execução de `pingKeepAlive()` (no boot, a cada 6h, via endpoint HTTP e via GitHub Actions) executa automaticamente `SELECT public.purge_expired_order_images()`.
+* **Rotas de API Criadas ([server/auth-routes.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/auth-routes.mjs) e [server/db.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/db.mjs)):**
+  * `POST /api/v1/store/attachments`: Recebe a imagem original enviada pela cliente (JPG/PNG/WebP até 8 MB), valida MIME e salva os bytes originais intactos no PostgreSQL com expiração de 7 dias.
+  * `GET /api/v1/store/attachments/:id/download`: Executa expurgo preventivo, registra `downloaded_at` e entrega o arquivo original exato com `Content-Disposition: attachment; filename="TP-2026-XXXX_nome-original.ext"`. Se já tiver passado 7 dias ou sido apagado, retorna `HTTP 410 Gone`.
+  * `DELETE /api/v1/store/orders/:orderId/attachments`: Permite à administradora apagar imediatamente as imagens de um pedido assim que terminar de produzir a arte, sem nem precisar esperar os 7 dias.
+  * `POST /api/v1/store/attachments/purge-expired`: Dispara manualmente a limpeza de imagens vencidas.
+* **Frontend Atualizado:**
+  * [js/product.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/product.js): Suporte a seleção de **múltiplos arquivos originais** (`multiple: true`, até 12 imagens por item), enviando o arquivo original para o banco e salvando apenas miniatura leve no `localStorage`.
+  * [js/admin/app.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/admin/app.js): No modal de detalhes do pedido em `/painel-tp/`, exibe a lista de arquivos enviados com nome original, tamanho em KB, contador regressivo de dias (`apaga automaticamente em X dias`), botão **"Baixar arquivo original"** e botão **"Apagar imagens agora (Arte pronta)"**.
+* **Testes Automatizados ([tests/security-auth.test.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/tests/security-auth.test.mjs)):** Adicionado Teste 8 validando upload original, download byte-a-byte idêntico e expurgo após 7 dias retornando `HTTP 410 Gone`.
 
 ---
 

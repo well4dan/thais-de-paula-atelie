@@ -395,17 +395,42 @@ export async function deleteAndAnonymizeUser({ userId, password, requestId }) {
 
 export async function getFullStoreSnapshot() {
   await ensureDatabaseReady();
-  const [prodRes, cupRes, setRes, ordRes, itemRes] = await Promise.all([
+  const [prodRes, cupRes, setRes, ordRes, itemRes, attRes] = await Promise.all([
     pool.query("SELECT * FROM public.products ORDER BY id ASC"),
     pool.query("SELECT * FROM public.coupons ORDER BY code ASC"),
     pool.query("SELECT settings_json FROM public.store_settings WHERE id = 1"),
     pool.query("SELECT * FROM public.orders ORDER BY created_at DESC LIMIT 200"),
     pool.query("SELECT * FROM public.order_items"),
+    pool.query(
+      `SELECT id, order_id, product_id, file_name, mime_type, size_bytes, downloaded_at, created_at, expires_at, purged_at
+       FROM public.order_attachments
+       WHERE order_id IS NOT NULL
+       ORDER BY created_at ASC`
+    ),
   ]);
+
+  const attByOrder = new Map();
+  for (const a of attRes.rows) {
+    const list = attByOrder.get(a.order_id) || [];
+    list.push({
+      id: a.id,
+      orderId: a.order_id,
+      productId: a.product_id,
+      fileName: a.file_name,
+      mimeType: a.mime_type,
+      sizeBytes: a.size_bytes,
+      downloadedAt: a.downloaded_at ? new Date(a.downloaded_at).toISOString() : null,
+      createdAt: a.created_at ? new Date(a.created_at).toISOString() : null,
+      expiresAt: a.expires_at ? new Date(a.expires_at).toISOString() : null,
+      purgedAt: a.purged_at ? new Date(a.purged_at).toISOString() : null,
+    });
+    attByOrder.set(a.order_id, list);
+  }
 
   const itemsByOrder = new Map();
   for (const it of itemRes.rows) {
     const arr = itemsByOrder.get(it.order_id) || [];
+    const orderAtts = (attByOrder.get(it.order_id) || []).filter((x) => x.productId === it.product_id);
     arr.push({
       productId: it.product_id,
       name: it.name,
@@ -415,6 +440,7 @@ export async function getFullStoreSnapshot() {
       unit: it.unit_price,
       selections: it.selections_json || {},
       photo: it.photo_data || null,
+      attachments: orderAtts.length ? orderAtts : it.attachments_json || [],
     });
     itemsByOrder.set(it.order_id, arr);
   }
@@ -559,10 +585,11 @@ export async function createOrderInPg(order, userId = null) {
     );
 
     for (const it of order.items) {
+      const attList = Array.isArray(it.attachments) ? it.attachments : [];
       await client.query(
         `INSERT INTO public.order_items
-         (order_id, product_id, name, image, mode, qty, unit_price, selections_json, photo_data)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
+         (order_id, product_id, name, image, mode, qty, unit_price, selections_json, photo_data, attachments_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::jsonb)`,
         [
           order.id,
           it.productId,
@@ -573,8 +600,20 @@ export async function createOrderInPg(order, userId = null) {
           it.unit,
           JSON.stringify(it.selections || {}),
           it.photo || null,
+          JSON.stringify(attList),
         ]
       );
+      for (const att of attList) {
+        if (att && att.id) {
+          await client.query(
+            `UPDATE public.order_attachments
+             SET order_id = $1,
+                 expires_at = NOW() + INTERVAL '7 days'
+             WHERE id = $2`,
+            [order.id, att.id]
+          );
+        }
+      }
       await client.query(
         `UPDATE public.products
          SET stock = GREATEST(0, COALESCE(stock, 0) - $1), updated_at = NOW()
@@ -589,6 +628,85 @@ export async function createOrderInPg(order, userId = null) {
   } finally {
     client.release();
   }
+}
+
+const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+export async function uploadOrderAttachmentInPg({ productId, fileName, mimeType, base64Data, orderId = null }) {
+  await ensureDatabaseReady();
+  const cleanMime = String(mimeType || "").toLowerCase().trim();
+  if (!ALLOWED_IMAGE_MIMES.has(cleanMime)) {
+    const err = new Error("Formato inválido. Envie JPG, PNG ou WebP.");
+    err.status = 422;
+    throw err;
+  }
+  const cleanBase64 = String(base64Data || "").replace(/^data:[^;]+;base64,/, "");
+  const buf = Buffer.from(cleanBase64, "base64");
+  if (!buf.length || buf.length > 8 * 1024 * 1024) {
+    const err = new Error("O arquivo deve ter entre 1 byte e 8 MB.");
+    err.status = 422;
+    throw err;
+  }
+  const safeName = String(fileName || "imagem-cliente.jpg")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .slice(0, 120);
+  const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
+
+  const { rows } = await pool.query(
+    `INSERT INTO public.order_attachments
+     (order_id, product_id, file_name, mime_type, size_bytes, file_data, sha256_hash, created_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW() + INTERVAL '7 days')
+     RETURNING id, order_id, product_id, file_name, mime_type, size_bytes, created_at, expires_at`,
+    [orderId, String(productId || "custom"), safeName, cleanMime, buf.length, buf, sha256]
+  );
+  const r = rows[0];
+  return {
+    id: r.id,
+    orderId: r.order_id,
+    productId: r.product_id,
+    fileName: r.file_name,
+    mimeType: r.mime_type,
+    sizeBytes: r.size_bytes,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+    expiresAt: r.expires_at instanceof Date ? r.expires_at.toISOString() : r.expires_at,
+    purgedAt: null,
+  };
+}
+
+export async function downloadOrderAttachmentInPg(attachmentId) {
+  await ensureDatabaseReady();
+  await pool.query("SELECT public.purge_expired_order_images()");
+  const { rows } = await pool.query(
+    `UPDATE public.order_attachments
+     SET downloaded_at = COALESCE(downloaded_at, NOW())
+     WHERE id = $1
+     RETURNING id, order_id, product_id, file_name, mime_type, size_bytes, file_data, created_at, expires_at, purged_at`,
+    [attachmentId]
+  );
+  return rows[0] || null;
+}
+
+export async function purgeOrderAttachmentsByOrderIdInPg(orderId) {
+  await ensureDatabaseReady();
+  const { rowCount } = await pool.query(
+    `UPDATE public.order_attachments
+     SET file_data = NULL, purged_at = NOW()
+     WHERE order_id = $1 AND purged_at IS NULL`,
+    [orderId]
+  );
+  await pool.query(
+    `UPDATE public.order_items
+     SET photo_data = 'removida'
+     WHERE order_id = $1 AND photo_data IS NOT NULL`,
+    [orderId]
+  );
+  return rowCount;
+}
+
+export async function runExpiredAttachmentsPurgeInPg() {
+  await ensureDatabaseReady();
+  const { rows } = await pool.query("SELECT public.purge_expired_order_images() AS purged");
+  return Number(rows[0]?.purged || 0);
 }
 
 export async function updateOrderStatusInPg({ id, status, payment, history }) {

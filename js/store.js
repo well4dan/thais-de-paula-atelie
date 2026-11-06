@@ -160,18 +160,18 @@ export function cartCount() {
   return cart().reduce((n, i) => n + i.qty, 0);
 }
 
-export function addToCart({ productId, qty = 1, selections = {}, photo = null }) {
+export function addToCart({ productId, qty = 1, selections = {}, photo = null, attachments = [] }) {
   const product = productById(productId);
   if (!product || !product.active) throw new StoreError("not_found", "Produto indisponível.");
   const items = cart();
-  const hasPersonal = Object.values(selections).some(Boolean) || photo;
-  const same = !hasPersonal && items.find((i) => i.productId === productId && !i.photo && !Object.values(i.selections).some(Boolean));
+  const hasPersonal = Object.values(selections).some(Boolean) || photo || (attachments && attachments.length > 0);
+  const same = !hasPersonal && items.find((i) => i.productId === productId && !i.photo && !(i.attachments && i.attachments.length) && !Object.values(i.selections).some(Boolean));
   const already = items.filter((i) => i.productId === productId).reduce((n, i) => n + i.qty, 0);
   if (product.mode === "pronta" && already + qty > product.stock) {
     throw new StoreError("stock", `Só temos ${product.stock} em estoque.`);
   }
   if (same) same.qty += qty;
-  else items.push({ key: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, productId, qty, selections, photo });
+  else items.push({ key: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, productId, qty, selections, photo, attachments });
   saveCart(items);
 }
 
@@ -285,6 +285,7 @@ export function createOrder({ customer, shipping, payment, couponCode }) {
     items: totals.rows.map((r) => ({
       productId: r.product.id, name: r.product.name, image: r.product.image, mode: r.product.mode,
       qty: r.item.qty, unit: r.unit, selections: r.item.selections, photo: r.item.photo || null,
+      attachments: Array.isArray(r.item.attachments) ? r.item.attachments : [],
     })),
     totals: { subtotal: totals.subtotal, discount: totals.discount, shipping: totals.shipping, total: totals.total },
     leadDays: totals.maxLead,
@@ -321,4 +322,29 @@ export function setOrderStatus(id, status, note = "") {
     history: order.history,
   });
   return order;
+}
+
+export async function purgeOrderAttachments(orderId) {
+  const list = read(KEYS.orders, []);
+  const order = list.find((o) => o.id === orderId);
+  if (order) {
+    const now = new Date().toISOString();
+    order.items.forEach((it) => {
+      if (it.photo) it.photo = "removida";
+      if (Array.isArray(it.attachments)) {
+        it.attachments.forEach((a) => {
+          a.purgedAt = now;
+        });
+      }
+    });
+    write(KEYS.orders, list);
+  }
+  try {
+    await fetch(`/api/v1/store/orders/${encodeURIComponent(orderId)}/attachments`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+  } catch {
+    // Fallback local já atualizado
+  }
 }

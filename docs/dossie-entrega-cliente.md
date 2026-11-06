@@ -144,6 +144,19 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 
 ---
 
+### Fase 8: Cofre Temporário de Imagens dos Clientes para Artes (Retenção de 7 Dias + Download Original)
+1. **Envio de Múltiplas Imagens em Qualidade Original (`produto.html`):**
+   * Nas peças personalizadas com foto (Polaroides, Quadros Decorativos, Ímãs de Geladeira, Capas com Foto), a cliente pode anexar **uma ou várias imagens originais** (JPG, PNG ou WebP até 8 MB cada).
+   * Os arquivos são enviados **exatamente como a cliente selecionou** (sem perda de nitidez para impressão gráfica) para a tabela segura `public.order_attachments` no PostgreSQL, enquanto o navegador guarda apenas uma miniatura leve para pré-visualização instantânea.
+2. **Download Fiel pela Administradora no Painel (`/painel-tp/`):**
+   * Ao abrir os detalhes do pedido no painel, a Thaís visualiza cada arquivo anexado com nome original, tamanho em KB/MB, contador de dias restantes e o botão **"Baixar arquivo original"**.
+   * Ao clicar, o sistema baixa a imagem original já renomeada com o código do pedido (`TP-2026-XXXX_nome-do-arquivo.jpg`) para facilitar a organização na pasta de produção do ateliê.
+3. **Exclusão Automática Após 7 Dias (Economia de Banco + Conformidade LGPD):**
+   * **Regra Automática de 7 Dias:** A função `public.purge_expired_order_images()` no PostgreSQL verifica continuamente os pedidos e, assim que completam **7 dias**, **apaga automaticamente os arquivos pesados de imagem do banco de dados**, mantendo apenas o registro histórico do pedido.
+   * **Botão "Apagar imagens agora (Arte pronta)":** Caso a Thaís já tenha baixado as fotos e produzido a peça antes dos 7 dias, ela pode clicar em um botão no próprio pedido para liberar espaço imediatamente.
+
+---
+
 ## 3. Mapa de Páginas e Rotas Entregues
 
 | Página / Rota | Arquivo Principal | Finalidade |

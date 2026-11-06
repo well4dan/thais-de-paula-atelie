@@ -237,4 +237,59 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     });
     assert.equal(resMe.status, 401);
   });
+
+  await t.test("8. Upload de imagem original da cliente, download fiel pela administradora e exclusão automática após 7 dias", async () => {
+    // Cria um PNG 1x1 válido em bytes
+    const samplePngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const expectedBuffer = Buffer.from(samplePngBase64, "base64");
+
+    const upRes = await fetch(`${baseUrl}/api/v1/store/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: "p-polaroide-12",
+        fileName: "foto-cliente-original.png",
+        mimeType: "image/png",
+        base64Data: `data:image/png;base64,${samplePngBase64}`,
+      }),
+    });
+    assert.equal(upRes.status, 201);
+    const upBody = await upRes.json();
+    const attId = upBody.attachment.id;
+    assert.ok(attId);
+    assert.equal(upBody.attachment.sizeBytes, expectedBuffer.length);
+
+    // Administradora faz o download da imagem original
+    const dlRes = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`);
+    assert.equal(dlRes.status, 200);
+    assert.equal(dlRes.headers.get("content-type"), "image/png");
+    assert.match(dlRes.headers.get("content-disposition") || "", /foto-cliente-original\.png/);
+    const downloadedBuf = Buffer.from(await dlRes.arrayBuffer());
+    assert.ok(downloadedBuf.equals(expectedBuffer));
+
+    // Simula passagem de mais de 7 dias no banco e dispara a rotina automática de expurgo
+    await pool.query(
+      "UPDATE public.order_attachments SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
+      [attId]
+    );
+    const purgeRes = await fetch(`${baseUrl}/api/v1/store/attachments/purge-expired`, {
+      method: "POST",
+    });
+    assert.equal(purgeRes.status, 200);
+
+    // Verifica que os bytes foram apagados do banco (file_data IS NULL) e o download retorna 410 Gone
+    const { rows } = await pool.query(
+      "SELECT file_data, purged_at FROM public.order_attachments WHERE id = $1",
+      [attId]
+    );
+    assert.equal(rows[0].file_data, null);
+    assert.ok(rows[0].purged_at);
+
+    const dlAfter = await fetch(`${baseUrl}/api/v1/store/attachments/${attId}/download`);
+    assert.equal(dlAfter.status, 410);
+
+    // Limpa registro de teste
+    await pool.query("DELETE FROM public.order_attachments WHERE id = $1", [attId]);
+  });
 });
