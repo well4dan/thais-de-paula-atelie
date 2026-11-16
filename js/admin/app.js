@@ -2,9 +2,10 @@
 // Sem servidor Node (demonstração estática na Vercel) o painel entra em modo demonstração com PIN e dados fictícios locais.
 
 import { $, $$, h, icon, clear, toast } from "../dom.js";
-import { money, dateTime, slugify } from "../format.js";
+import { money, dateTime } from "../format.js";
 import * as store from "../store.js";
-import { IMAGE_CHOICES } from "../data/seed.js";
+import { renderSiteTab } from "./site-content.js";
+import { renderProducts } from "./products.js";
 
 store.init();
 
@@ -182,7 +183,8 @@ function renderActiveTab() {
   if (!view) return;
   if (activeTab === "visao") renderOverview(view);
   else if (activeTab === "pedidos") renderOrders(view);
-  else if (activeTab === "produtos") renderProducts(view);
+  else if (activeTab === "site") renderSiteTab(view);
+  else if (activeTab === "produtos") renderProducts(view, { rerender: renderActiveTab });
   else if (activeTab === "cupons") renderCoupons(view);
   else if (activeTab === "config") renderSettings(view);
 }
@@ -416,125 +418,6 @@ function renderOrders(view) {
 }
 
 /* 3. Produtos */
-function renderProducts(view) {
-  const list = store.products({ includeInactive: true });
-  view.append(
-    h("div", { class: "admin-card" },
-      h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.75rem" },
-        h("h2", { style: "font-size:1.6rem", text: `Catálogo (${list.length} itens)` }),
-        h("button", {
-          class: "btn btn--sm", type: "button",
-          onclick: () => openProductModal(null),
-        }, icon("plus"), "Novo produto")),
-      h("table", { class: "admin-table" },
-        h("thead", {}, h("tr", {},
-          h("th", { text: "Peça" }),
-          h("th", { text: "Linha" }),
-          h("th", { text: "Modo" }),
-          h("th", { text: "Preço" }),
-          h("th", { text: "Estoque / Prazo" }),
-          h("th", { text: "Status" }),
-          h("th", { text: "Ações" }))),
-        h("tbody", {}, list.map((p) => h("tr", {},
-          h("td", {},
-            h("div", { style: "display:flex;align-items:center;gap:0.65rem" },
-              h("img", { src: p.image, alt: "", width: 44, height: 44, style: "border-radius:10px;object-fit:cover" }),
-              h("strong", { text: p.name }))),
-          h("td", { text: store.lineBySlug(p.line)?.name || p.line }),
-          h("td", { text: p.mode === "pronta" ? "Pronta entrega" : "Sob demanda" }),
-          h("td", { text: money(p.price) }),
-          h("td", { text: p.mode === "pronta" ? `${p.stock} un.` : `${p.leadDays} dias úteis` }),
-          h("td", { text: p.active ? (p.featured ? "Ativo + Destaque" : "Ativo") : "Oculto" }),
-          h("td", {},
-            h("div", { style: "display:flex;gap:0.4rem" },
-              h("button", { class: "btn btn--sm btn--ghost", type: "button", onclick: () => openProductModal(p) }, "Editar"),
-              h("button", {
-                class: "icon-btn", type: "button", "aria-label": `Excluir ${p.name}`,
-                onclick: () => {
-                  store.removeProduct(p.id);
-                  toast("Produto removido.");
-                  renderActiveTab();
-                },
-              }, icon("trash"))))))))));
-}
-
-function openProductModal(existing) {
-  const dlg = $("#admin-dialog");
-  const body = clear($("#admin-dialog-body"));
-  $("#admin-dialog-title").textContent = existing ? `Editar ${existing.name}` : "Novo produto";
-
-  const p = existing || {
-    id: "", slug: "", name: "", line: "cadernos", mode: "demanda",
-    price: 3990, stock: 10, leadDays: 5, featured: false, active: true,
-    image: IMAGE_CHOICES[0], description: "",
-    options: [{ id: "nome", type: "text", label: "Nome para personalizar", maxLength: 22, required: true }],
-  };
-
-  const form = h("form", {
-    class: "form-grid",
-    onsubmit: (e) => {
-      e.preventDefault();
-      const name = $("#pf-name").value.trim();
-      const mode = $("#pf-mode").value;
-      const priceReais = Number(String($("#pf-price").value).replace(",", "."));
-      const hasNameOpt = $("#pf-opt-name").checked;
-      const hasPhotoOpt = $("#pf-opt-photo").checked;
-      const options = [];
-      if (mode === "demanda" && hasNameOpt) options.push({ id: "nome", type: "text", label: "Nome para personalizar", maxLength: 22, required: true });
-      if (mode === "demanda" && hasPhotoOpt) options.push({ id: "foto", type: "photo", label: "Sua foto", required: true });
-
-      try {
-        store.saveProduct({
-          id: p.id || undefined,
-          slug: p.slug || slugify(name),
-          name,
-          line: $("#pf-line").value,
-          mode,
-          price: Math.round(priceReais * 100),
-          stock: mode === "pronta" ? Number($("#pf-stock").value) : null,
-          leadDays: mode === "demanda" ? Number($("#pf-lead").value) : 0,
-          image: $("#pf-img").value,
-          description: $("#pf-desc").value.trim() || "Peça artesanal feita no Thaís de Paula Ateliê.",
-          featured: $("#pf-featured").checked,
-          active: $("#pf-active").checked,
-          options: existing && existing.options.length > 2 ? existing.options : options,
-        });
-        dlg.close();
-        toast("Produto salvo!");
-        renderActiveTab();
-      } catch (err) {
-        toast(err.message, "error");
-      }
-    },
-  },
-    h("div", { class: "field full" }, h("label", { for: "pf-name", text: "Nome do produto" }), h("input", { class: "input", id: "pf-name", value: p.name, required: true })),
-    h("div", { class: "field" },
-      h("label", { for: "pf-line", text: "Linha" }),
-      h("select", { class: "select", id: "pf-line" }, store.lines().map((l) => h("option", { value: l.slug, selected: p.line === l.slug, text: l.name })))),
-    h("div", { class: "field" },
-      h("label", { for: "pf-mode", text: "Modo de venda" }),
-      h("select", { class: "select", id: "pf-mode" },
-        h("option", { value: "demanda", selected: p.mode === "demanda", text: "Sob demanda (personalizado)" }),
-        h("option", { value: "pronta", selected: p.mode === "pronta", text: "Pronta entrega (estoque)" }))),
-    h("div", { class: "field" }, h("label", { for: "pf-price", text: "Preço (R$)" }), h("input", { class: "input", id: "pf-price", type: "number", step: "0.10", value: (p.price / 100).toFixed(2) })),
-    h("div", { class: "field" }, h("label", { for: "pf-stock", text: "Estoque (se pronta entrega)" }), h("input", { class: "input", id: "pf-stock", type: "number", value: String(p.stock ?? 10) })),
-    h("div", { class: "field" }, h("label", { for: "pf-lead", text: "Prazo dias úteis (se sob demanda)" }), h("input", { class: "input", id: "pf-lead", type: "number", value: String(p.leadDays || 5) })),
-    h("div", { class: "field" },
-      h("label", { for: "pf-img", text: "Foto do produto" }),
-      h("select", { class: "select", id: "pf-img" }, IMAGE_CHOICES.map((u) => h("option", { value: u, selected: p.image === u, text: u.replace("/img/", "") })))),
-    h("div", { class: "field full" }, h("label", { for: "pf-desc", text: "Descrição" }), h("textarea", { class: "textarea", id: "pf-desc", text: p.description })),
-    h("label", { class: "check" }, h("input", { type: "checkbox", id: "pf-opt-name", checked: (p.options || []).some((o) => o.type === "text") }), "Pedir nome para personalizar"),
-    h("label", { class: "check" }, h("input", { type: "checkbox", id: "pf-opt-photo", checked: (p.options || []).some((o) => o.type === "photo") }), "Pedir foto do cliente"),
-    h("label", { class: "check" }, h("input", { type: "checkbox", id: "pf-featured", checked: p.featured }), "Destacar na página inicial"),
-    h("label", { class: "check" }, h("input", { type: "checkbox", id: "pf-active", checked: p.active }), "Visível na loja"),
-    h("div", { class: "full", style: "display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem" },
-      h("button", { class: "btn btn--sm btn--ghost", type: "button", onclick: () => dlg.close() }, "Cancelar"),
-      h("button", { class: "btn btn--sm", type: "submit" }, "Salvar produto")));
-
-  body.append(form);
-  dlg.showModal();
-}
-
 /* 4. Cupons */
 function renderCoupons(view) {
   const list = store.coupons();

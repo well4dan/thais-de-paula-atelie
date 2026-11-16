@@ -2,6 +2,10 @@
 
 export const LINES = [
   { slug: "cadernos", name: "Cadernos personalizados", short: "Capa com seu nome, tema e miolo do seu jeito.", image: "/img/p-caderno.webp" },
+  { slug: "agendas", name: "Agendas", short: "Organização diária com capa dura e o seu nome.", image: "/img/p-agenda.webp" },
+  { slug: "planners", name: "Planners", short: "Planejamento anual, mensal e semanal completo.", image: "/img/p-planner.webp" },
+  { slug: "calendarios", name: "Calendários", short: "Calendários de mesa com base firme e datas especiais.", image: "/img/p-calendario.webp" },
+  { slug: "maternidade", name: "Livros de maternidade", short: "Álbuns afetivos e cadernetas para guardar cada fase do bebê.", image: "/img/p-maternidade.webp" },
   { slug: "blocos", name: "Blocos de anotações", short: "Para a mesa, a bolsa ou de lembrancinha.", image: "/img/p-bloco.webp" },
   { slug: "lapis", name: "Personalização de lápis", short: "Lápis com nome para a volta às aulas.", image: "/img/p-lapis.webp" },
   { slug: "polaroide", name: "Fotos polaroide", short: "Suas fotos impressas com borda branca.", image: "/img/p-polaroide.webp" },
@@ -146,6 +150,109 @@ export const PRODUCTS = [
     price: 1690, stock: 15, leadDays: 0, featured: false, active: true, image: "/img/p-imas.webp",
     description: "Um ímã de flor em aquarela e um redondo com coração.", options: [],
   },
+  {
+    id: "p17", slug: "calendario-de-mesa-personalizado", name: "Calendário de mesa personalizado", line: "calendarios", mode: "demanda",
+    price: 3690, stock: null, leadDays: 5, featured: true, active: true, image: "/img/p-calendario.webp",
+    description: "Calendário de mesa com base rígida em papel kraft ou branco, wire-o dourado, 12 meses ilustrados e personalização com seu nome ou foto.",
+    options: [
+      opt.name("Nome na capa", 22),
+      opt.select("modelo", "Modelo", [
+        { label: "Ilustrado floral (12 meses)", delta: 0 },
+        { label: "Com 12 fotos suas (1 por mês)", delta: 1200 },
+      ]),
+      opt.photo(false),
+      opt.theme(),
+      opt.note(),
+    ],
+  },
+  {
+    id: "p18", slug: "calendario-de-mesa-floral-a6", name: "Calendário de mesa floral A6", line: "calendarios", mode: "pronta",
+    price: 2890, stock: 14, leadDays: 0, featured: false, active: true, image: "/img/p-calendario.webp",
+    description: "Calendário compacto para escrivaninha com aquarela botânica, feriados nacionais marcados e espaço para metas do mês.",
+    options: [],
+  },
+  {
+    id: "p19", slug: "agenda-diaria-personalizada", name: "Agenda diária personalizada", line: "agendas", mode: "demanda",
+    price: 8990, stock: null, leadDays: 7, featured: true, active: true, image: "/img/p-agenda.webp",
+    description: "Agenda com capa dura laminada, seu nome gravado, elástico de fechamento, bolso interno, cartela de adesivos e páginas diárias com horários.",
+    options: [
+      opt.name("Nome na capa", 24),
+      opt.select("miolo", "Formato do miolo", [
+        { label: "Datado (1 dia por página)", delta: 0 },
+        { label: "Permanente (2 dias por página)", delta: 0 },
+      ]),
+      opt.select("acabamento", "Laminação da capa", [
+        { label: "Fosco toque de seda", delta: 0 },
+        { label: "Brilho", delta: 0 },
+        { label: "Holográfico confete", delta: 800 },
+      ]),
+      opt.theme(),
+      opt.note(),
+    ],
+  },
+  {
+    id: "p20", slug: "agenda-permanente-floral", name: "Agenda permanente floral", line: "agendas", mode: "pronta",
+    price: 7490, stock: 6, leadDays: 0, featured: false, active: true, image: "/img/p-agenda.webp",
+    description: "Agenda permanente não datada com capa floral rosa queimado e wire-o dourado, pronta para começar em qualquer época do ano.",
+    options: [],
+  },
+  {
+    id: "p21", slug: "planner-anual-personalizado", name: "Planner anual personalizado", line: "planners", mode: "demanda",
+    price: 10990, stock: null, leadDays: 7, featured: true, active: true, image: "/img/p-planner.webp",
+    description: "Planner completo com 12 divisórias em abas laminadas, visão mensal e semanal, controle financeiro, roda da vida, metas e bolso duplo.",
+    options: [
+      opt.name("Nome ou frase na capa", 26),
+      opt.select("layout", "Visão semanal", [
+        { label: "Vertical em colunas", delta: 0 },
+        { label: "Horizontal pautado", delta: 0 },
+      ]),
+      opt.select("acabamento", "Acabamento da capa", [
+        { label: "Fosco toque de seda", delta: 0 },
+        { label: "Holográfico", delta: 800 },
+      ]),
+      opt.theme(),
+      opt.note(),
+    ],
+  },
+  {
+    id: "p22", slug: "planner-semanal-de-mesa", name: "Planner semanal de mesa", line: "planners", mode: "pronta",
+    price: 3490, stock: 15, leadDays: 0, featured: false, active: true, image: "/img/p-planner.webp",
+    description: "Bloco destacável A4 com 52 folhas em papel 90g para organizar os compromissos da semana, hábitos e prioridades.",
+    options: [],
+  },
+  {
+    id: "p23", slug: "livro-do-bebe-e-maternidade", name: "Livro do bebê e maternidade personalizado", line: "maternidade", mode: "demanda",
+    price: 11990, stock: null, leadDays: 8, featured: true, active: true, image: "/img/p-maternidade.webp",
+    description: "Diário e álbum afetivo para guardar as memórias desde a descoberta da gravidez até o primeiro aniversário, com páginas para fotos e mesversários.",
+    options: [
+      opt.name("Nome do bebê na capa", 24),
+      opt.select("paleta", "Paleta do miolo", [
+        { label: "Rosa antigo e creme", delta: 0 },
+        { label: "Verde sálvia e bege", delta: 0 },
+        { label: "Neutro aquarela", delta: 0 },
+      ]),
+      opt.select("acabamento", "Apresentação", [
+        { label: "Livro com cantoneiras douradas", delta: 0 },
+        { label: "Kit com caixa de recordações combinando", delta: 3500 },
+      ]),
+      opt.photo(false),
+      opt.note(),
+    ],
+  },
+  {
+    id: "p24", slug: "caderneta-de-saude-do-bebe", name: "Caderneta de saúde do bebê personalizada", line: "maternidade", mode: "demanda",
+    price: 6490, stock: null, leadDays: 6, featured: false, active: true, image: "/img/p-maternidade.webp",
+    description: "Caderneta oficial de vacinação encapada com capa dura laminada com o nome do bebê, bolso plástico para documentos e páginas extras de consultas.",
+    options: [
+      opt.name("Nome do bebê", 24),
+      opt.select("tema", "Tema da capa", [
+        { label: "Ursinhos em aquarela", delta: 0 },
+        { label: "Jardim encantado", delta: 0 },
+        { label: "Estrelas e nuvens", delta: 0 },
+      ]),
+      opt.note(),
+    ],
+  },
 ];
 
 export const COUPONS = [
@@ -162,6 +269,7 @@ export const SETTINGS = {
 };
 
 export const IMAGE_CHOICES = [
-  "/img/p-caderno.webp", "/img/p-bloco.webp", "/img/p-lapis.webp", "/img/p-polaroide.webp",
+  "/img/p-caderno.webp", "/img/p-agenda.webp", "/img/p-planner.webp", "/img/p-calendario.webp",
+  "/img/p-maternidade.webp", "/img/p-bloco.webp", "/img/p-lapis.webp", "/img/p-polaroide.webp",
   "/img/p-quadro.webp", "/img/p-adesivos.webp", "/img/p-etiquetas.webp", "/img/p-imas.webp",
 ];

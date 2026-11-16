@@ -50,6 +50,8 @@ export function setAdminCsrfToken(token) {
   adminCsrfToken = token || "";
 }
 
+export const getAdminCsrfToken = () => adminCsrfToken;
+
 // Ao sair do painel, os pedidos com dados das clientes não ficam guardados no navegador
 export function forgetAdminOrders() {
   try {
@@ -69,15 +71,22 @@ function notifyIfAdminExpired(res) {
   if (res.status === 401 && adminCsrfToken) window.dispatchEvent(new Event("tp:admin-expired"));
 }
 
+// Sincronizações em andamento: quem depende delas (ex.: vitrine logo após criar produto) pode aguardar com flushSync()
+const pendingSyncs = new Set();
+
 function bgSync(url, method = "POST", body = {}) {
   if (typeof fetch !== "function") return;
-  fetch(url, {
+  const task = fetch(url, {
     method,
     headers: apiHeaders(method, { "Content-Type": "application/json" }),
     credentials: "same-origin",
     body: JSON.stringify(body),
   }).then(notifyIfAdminExpired).catch(() => {});
+  pendingSyncs.add(task);
+  task.finally(() => pendingSyncs.delete(task));
 }
+
+export const flushSync = () => Promise.allSettled([...pendingSyncs]);
 
 // Vitrine pública recebe só catálogo, cupons e configurações; pedidos vêm apenas no snapshot da administradora
 export async function pullFromPostgres({ admin = false } = {}) {
@@ -107,6 +116,13 @@ export function init() {
     write(KEYS.settings, clone(SETTINGS));
     write(KEYS.orders, buildDemoOrders(PRODUCTS));
     write(KEYS.seeded, true);
+  } else {
+    const existing = read(KEYS.products, []);
+    const existingIds = new Set(existing.map((p) => p.id));
+    const missing = PRODUCTS.filter((p) => !existingIds.has(p.id));
+    if (missing.length > 0) {
+      write(KEYS.products, [...existing, ...clone(missing)]);
+    }
   }
   pullFromPostgres();
 }
@@ -154,6 +170,17 @@ export function saveProduct(input) {
   write(KEYS.products, all);
   bgSync("/api/v1/store/products", "POST", { product });
   return product;
+}
+
+// Espelha a vitrine salva no servidor no catálogo local (usado pela home e pela prévia do painel)
+export function applyShowcaseLocally(ids) {
+  const position = new Map(ids.map((id, i) => [id, i + 1]));
+  const all = products({ includeInactive: true }).map((p) => ({
+    ...p,
+    homeOrder: position.get(p.id) || null,
+    featured: position.has(p.id),
+  }));
+  write(KEYS.products, all);
 }
 
 export function removeProduct(id) {

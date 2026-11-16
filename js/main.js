@@ -5,6 +5,7 @@ import { initCart } from "./cart.js";
 import { initMotion } from "./motion.js";
 import { fetchCurrentUser } from "./auth-client.js";
 import { h, icon } from "./dom.js";
+import { initSiteContent } from "./site-content.js";
 
 store.init();
 
@@ -56,6 +57,7 @@ function initYear() {
   });
 }
 
+initSiteContent();
 initMenu();
 initDemoBar();
 initYear();

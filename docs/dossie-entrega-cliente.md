@@ -32,22 +32,26 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 3. **Página Inicial de Alto Impacto (`index.html`):**
    * **Hero Editorial Assimétrico:** Apresentação da proposta de valor com atalho direto para a loja e para encomendas personalizadas.
    * **Explicação Visual dos 2 Modos de Compra:** Diferenciação clara entre **Pronta Entrega** (envio em até 24h úteis com controle automático de estoque) e **Sob Demanda** (produção artesanal personalizada em 3 a 5 dias úteis).
-   * **Vitrine das 8 Linhas Oficiais:**
+   * **Vitrine das 12 Linhas Oficiais do Ateliê:**
      1. *Cadernos Personalizados* (Universitário, Colegial, A5, Devocional, Pedagógico)
-     2. *Blocos de Notas & Planners* (Bloco A6, Planner Semanal, Lista de Compras Magnética)
-     3. *Lápis Personalizados* (Kits com nome gravado e ponteira)
-     4. *Fotos Polaroide* (Kits com legenda personalizada e prévia de corte ao vivo)
-     5. *Quadros Decorativos* (Moldura madeira/branca com arte autoral ou foto)
-     6. *Adesivos em Vinil* (À prova d'água com recorte eletrônico)
-     7. *Etiquetas Escolares* (Kits completos termocolantes e vinílicos)
-     8. *Ímãs de Geladeira* (Foto-ímãs, calendários magnéticos e save the date)
+     2. *Agendas Personalizadas* (Diária datada 1 dia por página e Agenda permanente floral)
+     3. *Planners* (Planner anual personalizado com abas divisórias e Planner semanal de mesa)
+     4. *Calendários* (Calendário de mesa personalizado com 12 fotos ou floral e Calendário A6)
+     5. *Livros de Maternidade* (Livro do bebê e maternidade com caixa de recordações e Caderneta de saúde/vacinação personalizada)
+     6. *Blocos de Notas* (Bloco personalizado e Kit bloco com caneta)
+     7. *Lápis Personalizados* (Kits com nome gravado e ponteira)
+     8. *Fotos Polaroide* (Kits com legenda personalizada, varal de polaroides e prévia de corte ao vivo)
+     9. *Quadros Decorativos em MDF* (Com foto da família ou do pet)
+     10. *Adesivos em Vinil* (À prova d'água com recorte eletrônico)
+     11. *Etiquetas Escolares* (Kits completos termocolantes e vinílicos resistentes à água)
+     12. *Ímãs de Geladeira* (Foto-ímãs recortados e duplas ilustradas)
    * **Seção Sobre o Ateliê, Depoimentos de Clientes e Perguntas Frequentes (FAQ).**
 
 ---
 
 ### Fase 2: Loja Virtual Híbrida (`loja.html` e `produto.html`)
-1. **Catálogo Completo com 16 Produtos Iniciais (`loja.html`):**
-   * Filtros instantâneos por **Modalidade** (*Todos*, *Pronta Entrega*, *Sob Demanda*), **Categoria** (as 8 linhas do ateliê), **Busca por texto** e **Ordenação** (*Destaques*, *Menor Preço*, *Maior Preço*, *Pronta Entrega Primeiro*).
+1. **Catálogo Completo com 24 Produtos em 12 Linhas (`loja.html`):**
+   * Filtros instantâneos por **Modalidade** (*Todos*, *Pronta Entrega*, *Sob Demanda*), **Categoria** (as 12 linhas do ateliê), **Busca por texto** e **Ordenação** (*Destaques*, *Menor Preço*, *Maior Preço*, *Ordem Alfabética*).
    * Badges dinâmicos de disponibilidade: indicação exata de unidades restantes na Pronta Entrega (`Últimas X un.`) ou prazo de produção no Sob Demanda (`Sob demanda · 3 a 5 dias`).
 2. **Página de Produto e Estúdio de Personalização (`produto.html`):**
    * **Para itens Pronta Entrega:** Trava automática de limite máximo conforme o estoque disponível e baixa automática ao concluir o pedido.
@@ -181,6 +185,25 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
    * Em **Minha conta**, a cliente logada vê todos os pedidos feitos com a conta dela, de qualquer celular ou computador, sempre com a etapa atual.
 6. **Versão de apresentação continua funcionando:**
    * Na versão publicada só para demonstração (sem servidor), o painel abre em **modo demonstração** com PIN e dados fictícios salvos apenas no navegador.
+
+---
+
+### Fase 10: Controle da Vitrine, Banners, Popup e Faixas Promocionais pelo Painel (`005_site_content.sql`)
+1. **Nova Aba "Site e Vitrine" no Painel (`/painel-tp/`):**
+   * **Vitrine da Página Inicial:** A Thaís escolhe até 12 produtos e define a ordem exata em que aparecem na Home (arrastando ou pelas setas). Produtos sem estoque na pronta entrega ou ocultos saem sozinhos da vitrine.
+   * **Banners do Topo, do Meio e Popup:** Criação de banners com imagem convertida automaticamente para WebP leve, título, subtítulo, botão com link e agendamento opcional de data/hora de início e fim.
+   * **Faixas Promocionais no Topo:** Avisos rápidos no topo de todas as páginas (ex.: *"Frete grátis acima de R$ 199"* ou *"Agenda de Natal aberta"*), com cores oficiais da paleta da marca e agendamento por período.
+   * **Preços Promocionais ("De / Por") e Selos nos Produtos:** Suporte a preço antigo riscado (*"De R$ 89,90 por R$ 74,90"*), foto própria enviada direto pelo painel e selos automáticos ou manuais (*Novidade*, *Mais vendido*, *Promoção* e *Últimas unidades*).
+
+---
+
+### Fase 11: Blindagem Financeira no Servidor e Preparação para Gateway de Pagamento (`006_payments_and_financial_lock.sql`)
+1. **Recálculo de Valores 100% no Servidor (Zero Fraude de Preço):**
+   * Ao fechar um pedido no checkout, o servidor ignora qualquer valor enviado pelo navegador e recalcula no banco de dados PostgreSQL o preço unitário de cada produto, adicionais escolhidos, cupom de desconto e regra de frete.
+   * O estoque de produtos a pronta entrega é verificado e reservado dentro da mesma transação segura (`SELECT ... FOR UPDATE`), impedindo venda duplicada da última unidade.
+2. **Estrutura Pronta para Gateway (Asaas / PIX / Cartão / Boleto):**
+   * Criado o módulo [server/payments.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/payments.mjs) já compatível com a API oficial do **Asaas** (e operável em modo simulação até que a conta da cliente seja conectada no `.env`).
+   * Implementado o receptor oficial de notificações automáticas de pagamento (**Webhook `POST /api/v1/webhooks/payment`**) com validação criptográfica (`asaas-access-token` e `HMAC-SHA256`), conferência do valor pago e tabela `payment_webhook_events` para nunca processar um mesmo pagamento duas vezes.
 
 ---
 

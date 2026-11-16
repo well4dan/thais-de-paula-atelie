@@ -75,7 +75,9 @@
 │       ├── 001_initial_schema.sql      # Schema inicial de teste
 │       ├── 002_full_ecommerce_and_keepalive.sql # Migration base (11 tabelas, RLS e índices)
 │       ├── 003_order_attachments_ttl7d.sql      # Cofre temporário de imagens originais dos clientes (TTL 7 dias + expurgo SQL)
-│       └── 004_admin_sessions.sql               # Sessões da administradora + remoção do adminPin das configurações
+│       ├── 004_admin_sessions.sql               # Sessões da administradora + remoção do adminPin das configurações
+│       ├── 005_site_content.sql                 # Mídia WebP, banners, faixas promocionais e vitrine
+│       └── 006_payments_and_financial_lock.sql  # Blindagem financeira, colunas do gateway e tabela payment_webhook_events (RLS)
 ├── tests/
 │   └── security-auth.test.mjs          # Testes automatizados oficiais (14/14 passando contra o Supabase em 06/11/2026)
 ├── docs/
@@ -209,14 +211,48 @@
   * [js/my-account.js](js/my-account.js): lista pedidos da conta vindos do servidor (mesmo se o e-mail do checkout for outro) + os deste navegador.
 * **Testes:** 14/14 (novo 4b: `/me/orders` exige login e só devolve pedidos da própria conta). Verificado no navegador: cópia local "Aguardando pagamento" virou "Em produção" e "PIX (aprovado)" sozinha.
 
+### [LOG-012] Controle da Vitrine e Conteúdo do Site pelo Painel (Rodada 05)
+* **Ação:** Implementação completa da aba **"Site e vitrine"** no painel administrativo (`/painel-tp/`) conforme [docs/05-plano-painel-conteudo-site.md](docs/05-plano-painel-conteudo-site.md).
+* **Migração Aplicada:** [supabase/migrations/005_site_content.sql](supabase/migrations/005_site_content.sql):
+  * Tabelas `public.media_assets` (biblioteca WebP servida em `/media/<sha256>.webp` com cache imutável de 1 ano), `public.site_banners` (banners de `topo`, `meio` e `popup` com agendamento por data) e `public.site_announcements` (faixas promocionais no topo do site), todas com RLS ativa.
+  * Colunas novas em `public.products`: `home_order`, `image_url`, `compare_at_price` (preço "de R$ X por R$ Y") e `badges` (`novidade`, `mais_vendido`).
+* **Backend e Injeção Segura:** [server/media.mjs](server/media.mjs), [server/site-content.mjs](server/site-content.mjs), [server/site-content-routes.mjs](server/site-content-routes.mjs) e injeção de `<script type="application/json" id="site-content">` em [server.mjs](server.mjs).
+* **Frontend Público e Painel:** [js/site-content.js](js/site-content.js), [css/site-content.css](css/site-content.css), [js/admin/site-content.js](js/admin/site-content.js), [js/admin/site-banners.js](js/admin/site-banners.js), [js/admin/site-strips.js](js/admin/site-strips.js), [js/admin/site-showcase.js](js/admin/site-showcase.js), [js/admin/media-upload.js](js/admin/media-upload.js), [js/admin/products.js](js/admin/products.js) e [js/admin/sortable.js](js/admin/sortable.js).
+* **Testes:** Suíte [tests/site-content.test.mjs](tests/site-content.test.mjs) validando links seguros, dimensões WebP, autorização admin + CSRF, período ativo de banners/faixas, vitrine de até 12 itens e preços promocionais.
+
+### [LOG-013] Expansão do Catálogo para 12 Linhas e 24 Produtos (Calendários, Agendas, Planners e Livros de Maternidade)
+* **Ação:** Inclusão das 4 novas linhas solicitadas pelo cliente no catálogo oficial ([js/data/seed.js](js/data/seed.js), [index.html](index.html), [loja.html](loja.html) e Supabase PostgreSQL):
+  1. **Calendários (`calendarios`):** `p17` (*Calendário de mesa personalizado* — sob demanda, com opção de 12 fotos ou floral) e `p18` (*Calendário de mesa floral A6* — pronta entrega).
+  2. **Agendas (`agendas`):** `p19` (*Agenda diária personalizada* — sob demanda, datada ou permanente, laminação fosca/brilho/holográfica) e `p20` (*Agenda permanente floral* — pronta entrega).
+  3. **Planners (`planners`):** `p21` (*Planner anual personalizado* — sob demanda, com 12 divisórias em abas, visão vertical/horizontal) e `p22` (*Planner semanal de mesa* — pronta entrega).
+  4. **Livros de maternidade (`maternidade`):** `p23` (*Livro do bebê e maternidade personalizado* — sob demanda, com opção de caixa de recordações) e `p24` (*Caderneta de saúde do bebê personalizada* — sob demanda).
+* **Fotografia de Produto:** Geradas e otimizadas 4 novas imagens WebP (`img/p-calendario.webp`, `img/p-agenda.webp`, `img/p-planner.webp`, `img/p-maternidade.webp`).
+* **Sincronização Idempotente:** [server/pg-pool.mjs](server/pg-pool.mjs) (`seedEcommerceIfNeeded`) e [js/store.js](js/store.js) (`init`) atualizados para inserir automaticamente novos produtos do seed (`ON CONFLICT (id) DO NOTHING`) sem sobrescrever produtos já editados no banco.
+
+### [LOG-014] Blindagem Financeira (Veto V7 Fechado) + Estrutura Pronta para Gateway de Pagamento (Asaas / Multi-Provider)
+* **Ação:** Fechamento do Veto V7 de segurança financeira e preparação completa do backend e banco para conectar o gateway de pagamento (com adaptador nativo para **Asaas** e modo `sandbox_sim` enquanto a cliente não cria a conta).
+* **Migração Aplicada:** [supabase/migrations/006_payments_and_financial_lock.sql](supabase/migrations/006_payments_and_financial_lock.sql):
+  * Novas colunas em `public.orders`: `payment_provider`, `gateway_charge_id`, `gateway_checkout_url`, `pix_qr_payload`, `boleto_digitable_line`, `paid_at`.
+  * Nova tabela `public.payment_webhook_events` com RLS ativa (sem política pública) e chave única `(provider, event_id)` para garantir idempotência estrita contra reprocessamento de webhooks.
+* **Adaptador do Gateway ([server/payments.mjs](server/payments.mjs)):**
+  * `createGatewayCharge()`: cria cliente e cobrança no **Asaas v3** (`PIX`, `BOLETO` ou Cartão/`UNDEFINED`) quando `PAYMENT_PROVIDER=asaas` + `ASAAS_API_KEY` estão configurados no `.env`, retornando `checkoutUrl`, `pixQrPayload` e `boletoLine`. Sem API key, opera no modo `sandbox_sim`.
+  * `verifyWebhookAuth()`: verifica o segredo `PAYMENT_WEBHOOK_SECRET` via `crypto.timingSafeEqual` tanto pelo cabeçalho oficial `asaas-access-token` quanto por HMAC-SHA256 (`x-webhook-signature`).
+* **Recálculo Autoritativo + Reserva Atômica de Estoque ([server/db.mjs](server/db.mjs)):**
+  * `createOrderInPg()` agora ignora qualquer preço, adicional, desconto ou frete vindo do navegador: trava as linhas em `public.products` com `SELECT ... FOR UPDATE`, verifica estoque em tempo real (`409` se insuficiente), soma preço base + adicionais do catálogo, valida o cupom em `public.coupons`, aplica a regra de frete de `public.store_settings`, gera o código `TP-YYYY-XXXX` no servidor quando omitido e grava o pedido auditado.
+  * `processPaymentWebhookInPg()` valida que o valor pago no webhook não é inferior ao total calculado pelo servidor, garante idempotência e atualiza status para `pago` (ou devolve estoque e cancela em estorno/exclusão).
+* **Nova Rota de Webhook ([server/auth-routes.mjs](server/auth-routes.mjs)):** `POST /api/v1/webhooks/payment`.
+* **Testes:** Adicionado Teste 9 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) provando bloqueio de fraude de preço no checkout e validação + idempotência do webhook Asaas.
+
 ---
 
 ## ✅ Checklist de Pendências (ordem de prioridade)
-- [ ] 🔴 Recalcular preço, desconto e frete no servidor em `POST /api/v1/store/orders` (veto V7).
+- [x] 🔴 Recalcular preço, desconto e frete no servidor em `POST /api/v1/store/orders` (veto V7 FECHADO no LOG-014).
+- [x] 🔴 Receptor de Webhooks com verificação criptográfica (`asaas-access-token` / HMAC-SHA256) e idempotência no PostgreSQL (LOG-014).
 - [ ] 🔴 TLS do Postgres com o CA do Supabase (`ssl: { ca }`) em `server/pg-pool.mjs`.
 - [ ] 🔴 `APP_SECRET_HEX` no `.env` de produção (hoje a chave do CPF fica em `data/.secret_key`).
+- [ ] 🟡 Colar `PAYMENT_PROVIDER=asaas`, `ASAAS_API_KEY` e `PAYMENT_WEBHOOK_SECRET` no `.env` assim que a Thaís criar a conta no Asaas.
 - [x] 🟡 Configurar `ADMIN_EMAIL` e `ADMIN_PASSWORD_HASH` no `.env` local: `npm run admin:hash` agora pede e-mail e senha e grava direto no `.env`.
-- [ ] 🟡 Código de pedido gerado no servidor e não sequencial.
+- [ ] 🟡 Código de pedido gerado 100% no servidor em todos os cenários (hoje o servidor gera se omitido, e aceita formato válido da demo).
 - [x] 🟡 `GET /api/v1/me/orders` para "Minha conta" listar pedidos de qualquer aparelho (LOG-011).
 - [ ] 🟡 Vincular upload de foto a um token do carrinho.
 - [ ] 🟡 Backup com restore testado + RTO/RPO.

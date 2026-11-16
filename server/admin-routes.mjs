@@ -28,6 +28,7 @@ import {
 } from "./admin-auth.mjs";
 import { checkRateLimit, sendJson, readJsonBody } from "./http-utils.mjs";
 import { predictZipSize, streamZip } from "./zip.mjs";
+import { handleSiteContentAdmin } from "./site-content-routes.mjs";
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
@@ -140,6 +141,8 @@ async function routeAdminRequest(req, res, url, session, requestId) {
       requestId,
     });
   }
+
+  if (await handleSiteContentAdmin(req, res, url, requestId)) return;
 
   if (method === "PATCH" && pathname === "/api/v1/store/orders/status") {
     await updateOrderStatusInPg(await readJsonBody(req));

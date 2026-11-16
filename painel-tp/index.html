@@ -28,7 +28,9 @@
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/components.css">
   <link rel="stylesheet" href="/css/overlays.css">
+  <link rel="stylesheet" href="/css/site-content.css">
   <link rel="stylesheet" href="/css/admin.css">
+  <link rel="stylesheet" href="/css/admin-site.css">
 </head>
 <body>
   <!-- Tela de acesso: login validado no servidor; PIN apenas na demonstração estática sem servidor -->
@@ -85,6 +87,10 @@
             <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-receipt"></use></svg>
             <span>Pedidos</span>
           </button>
+          <button type="button" role="tab" aria-selected="false" data-admin-tab="site">
+            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-image"></use></svg>
+            <span>Site e vitrine</span>
+          </button>
           <button type="button" role="tab" aria-selected="false" data-admin-tab="produtos">
             <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-store"></use></svg>
             <span>Produtos e estoque</span>
@@ -110,7 +116,7 @@
       <div class="admin-top">
         <div>
           <h1 style="font-size:2rem">Gestão do Ateliê</h1>
-          <p class="muted" style="font-size:var(--t-sm)">Qualquer alteração feita aqui reflete imediatamente na loja deste navegador.</p>
+          <p class="muted" style="font-size:var(--t-sm)">Tudo o que você salva aqui aparece no site em até 1 minuto.</p>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
           <button class="btn btn--sm btn--ghost" id="btn-export-csv" type="button">

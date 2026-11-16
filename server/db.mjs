@@ -13,6 +13,7 @@ import {
   generateToken,
   sha256Hex,
 } from "./crypto.mjs";
+import { createGatewayCharge } from "./payments.mjs";
 
 export class ConflictError extends Error {
   constructor(message, field) {
@@ -408,6 +409,9 @@ function mapProductRow(r) {
     image: r.image,
     description: r.description,
     options: r.options_json || [],
+    compareAtPrice: r.compare_at_price || null,
+    badges: r.badges || [],
+    homeOrder: r.home_order || null,
   };
 }
 
@@ -579,13 +583,34 @@ export async function getAdminStoreSnapshot() {
   };
 }
 
+const PRODUCT_IMAGE_PATTERN = /^\/(img|media)\/[A-Za-z0-9._-]+\.webp$/;
+const MANUAL_BADGES = new Set(["novidade", "mais_vendido"]);
+
+function invalidProduct(message) {
+  return Object.assign(new Error(message), { status: 400, code: "INVALID_PRODUCT" });
+}
+
+// Campos novos validados no servidor; vitrine (featured/home_order) só muda pela rota da vitrine
+function normalizeProductPromo(p) {
+  if (!PRODUCT_IMAGE_PATTERN.test(String(p.image || ""))) throw invalidProduct("Imagem do produto inválida.");
+  const compareAt = p.compareAtPrice === null || p.compareAtPrice === undefined || p.compareAtPrice === "" ? null : Number(p.compareAtPrice);
+  if (compareAt !== null && (!Number.isInteger(compareAt) || compareAt <= Number(p.price))) {
+    throw invalidProduct("O preço \"de\" precisa ser maior que o preço atual.");
+  }
+  const badges = [...new Set(Array.isArray(p.badges) ? p.badges : [])];
+  if (badges.some((b) => !MANUAL_BADGES.has(b))) throw invalidProduct("Selo inválido.");
+  return { compareAt, badges };
+}
+
 export async function upsertProductInPg(p) {
   await ensureDatabaseReady();
   const id = p.id || `p${Date.now().toString(36)}`;
+  const { compareAt, badges } = normalizeProductPromo(p);
   await pool.query(
     `INSERT INTO public.products
-     (id, slug, name, line, mode, price, stock, lead_days, featured, active, image, description, options_json, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,NOW())
+     (id, slug, name, line, mode, price, stock, lead_days, featured, active, image, description, options_json,
+      compare_at_price, badges, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10,$11,$12::jsonb,$13,$14::text[],NOW())
      ON CONFLICT (id) DO UPDATE SET
        slug = EXCLUDED.slug,
        name = EXCLUDED.name,
@@ -594,11 +619,12 @@ export async function upsertProductInPg(p) {
        price = EXCLUDED.price,
        stock = EXCLUDED.stock,
        lead_days = EXCLUDED.lead_days,
-       featured = EXCLUDED.featured,
        active = EXCLUDED.active,
        image = EXCLUDED.image,
        description = EXCLUDED.description,
        options_json = EXCLUDED.options_json,
+       compare_at_price = EXCLUDED.compare_at_price,
+       badges = EXCLUDED.badges,
        updated_at = NOW()`,
     [
       id,
@@ -609,11 +635,12 @@ export async function upsertProductInPg(p) {
       p.price,
       p.stock,
       p.leadDays || 0,
-      Boolean(p.featured),
       Boolean(p.active),
       p.image,
       p.description,
       JSON.stringify(p.options || []),
+      compareAt,
+      badges,
     ]
   );
 }
@@ -652,69 +679,416 @@ export async function saveSettingsInPg(settings) {
   );
 }
 
-export async function createOrderInPg(order, userId = null) {
+function orderValidationError(message, status = 422, code = "INVALID_ORDER") {
+  return Object.assign(new Error(message), { status, code });
+}
+
+function computeServerUnitPrice(productRow, selections = {}) {
+  let price = Number(productRow.price);
+  const options = Array.isArray(productRow.options_json) ? productRow.options_json : [];
+  for (const option of options) {
+    if (option?.type !== "select" || !Array.isArray(option.choices)) continue;
+    const chosenLabel = selections?.[option.id];
+    const choice = option.choices.find((c) => c.label === chosenLabel);
+    if (choice) price += Number(choice.delta || 0);
+  }
+  return Math.max(0, Math.round(price));
+}
+
+async function generateServerOrderId(client) {
+  const year = new Date().getFullYear();
+  const prefix = `TP-${year}-`;
+  const { rows } = await client.query(
+    `SELECT COALESCE(MAX(CAST(SUBSTRING(id FROM 'TP-[0-9]{4}-([0-9]+)$') AS INTEGER)), 0)::int AS max_seq
+     FROM public.orders
+     WHERE id LIKE $1 AND id ~ '^TP-[0-9]{4}-[0-9]+$'`,
+    [`${prefix}%`]
+  );
+  const nextSeq = Number(rows[0]?.max_seq || 0) + 1;
+  return `${prefix}${String(nextSeq).padStart(4, "0")}`;
+}
+
+export async function createOrderInPg(orderInput, userId = null, requestId = null) {
   await ensureDatabaseReady();
+  if (!orderInput || !Array.isArray(orderInput.items) || orderInput.items.length === 0 || orderInput.items.length > 50) {
+    throw orderValidationError("Pedido inválido: envie entre 1 e 50 itens.", 422);
+  }
+
   const client = await pool.connect();
+  let savedOrder = null;
+  let customerCpfPlain = "";
+
   try {
     await client.query("BEGIN");
+
+    // Busca configurações reais da loja no PostgreSQL (nunca confia no frete vindo do navegador)
+    const { rows: setRows } = await client.query("SELECT settings_json FROM public.store_settings WHERE id = 1");
+    const storeCfg = {
+      shippingFlat: 1890,
+      freeShippingMin: 19900,
+      readyShipDays: 2,
+      ...(setRows[0]?.settings_json || {}),
+    };
+
+    const computedItems = [];
+    let subtotal = 0;
+    let maxLead = 0;
+
+    for (const rawItem of orderInput.items) {
+      const productId = String(rawItem?.productId || "").trim();
+      const qty = Math.trunc(Number(rawItem?.qty || 0));
+      if (!productId || !Number.isInteger(qty) || qty < 1 || qty > 99) {
+        throw orderValidationError("Quantidade ou produto inválido no carrinho.", 422);
+      }
+
+      // Trava a linha do produto até concluir o pedido (impede race condition de estoque)
+      const { rows: prodRows } = await client.query(
+        `SELECT id, name, image, mode, price, stock, lead_days, active, options_json
+         FROM public.products
+         WHERE id = $1
+         FOR UPDATE`,
+        [productId]
+      );
+      const prod = prodRows[0];
+      if (!prod || !prod.active) {
+        throw orderValidationError(`Produto indisponível no catálogo.`, 422, "PRODUCT_UNAVAILABLE");
+      }
+      if (prod.mode === "pronta" && Number(prod.stock || 0) < qty) {
+        throw orderValidationError(`Estoque insuficiente para "${prod.name}" (disponível: ${prod.stock || 0}).`, 409, "INSUFFICIENT_STOCK");
+      }
+
+      const selections = rawItem.selections && typeof rawItem.selections === "object" ? rawItem.selections : {};
+      const unitPrice = computeServerUnitPrice(prod, selections);
+      subtotal += unitPrice * qty;
+
+      const lead = prod.mode === "demanda" ? Number(prod.lead_days || 5) : Number(storeCfg.readyShipDays || 2);
+      if (lead > maxLead) maxLead = lead;
+
+      computedItems.push({
+        productId: prod.id,
+        name: prod.name,
+        image: prod.image,
+        mode: prod.mode,
+        qty,
+        unit: unitPrice,
+        selections,
+        photo: rawItem.photo || null,
+        attachments: Array.isArray(rawItem.attachments) ? rawItem.attachments : [],
+      });
+    }
+
+    // Valida e aplica cupom exclusivamente no servidor
+    let appliedCoupon = null;
+    let discount = 0;
+    const rawCoupon = String(orderInput.coupon || "").trim().toUpperCase();
+    if (rawCoupon) {
+      const { rows: cupRows } = await client.query(
+        "SELECT code, type, value, min_order, active FROM public.coupons WHERE code = $1",
+        [rawCoupon]
+      );
+      const cup = cupRows[0];
+      if (cup && cup.active && subtotal >= Number(cup.min_order || 0)) {
+        appliedCoupon = cup.code;
+        discount =
+          cup.type === "percent"
+            ? Math.round((subtotal * Number(cup.value)) / 100)
+            : Math.min(Number(cup.value), subtotal);
+      }
+    }
+
+    const shippingMethod = orderInput.shipping?.method === "envio" ? "envio" : "retirada";
+    const shippingCost =
+      shippingMethod === "envio" && subtotal - discount < Number(storeCfg.freeShippingMin || 19900)
+        ? Number(storeCfg.shippingFlat || 1890)
+        : 0;
+    const total = Math.max(0, subtotal - discount + shippingCost);
+    const serverTotals = { subtotal, discount, shipping: shippingCost, total };
+
+    const orderId =
+      orderInput.id && /^TP-\d{4}-\d{4,}$/.test(String(orderInput.id))
+        ? String(orderInput.id)
+        : await generateServerOrderId(client);
+
+    const paymentMethod = ["pix", "cartao", "boleto"].includes(String(orderInput.payment?.method || "").toLowerCase())
+      ? String(orderInput.payment.method).toLowerCase()
+      : "pix";
+
+    // Se usuário estiver logado, busca CPF descriptografado para envio seguro ao gateway Asaas (nunca logado)
+    if (userId) {
+      const { rows: uRows } = await client.query(
+        "SELECT cpf_encrypted FROM public.users WHERE id = $1 AND deleted_at IS NULL",
+        [userId]
+      );
+      if (uRows[0]?.cpf_encrypted) {
+        try {
+          customerCpfPlain = decryptField(uRows[0].cpf_encrypted);
+        } catch {
+          customerCpfPlain = "";
+        }
+      }
+    }
+
+    const createdAt = new Date().toISOString();
+    const initialOrderSkeleton = {
+      id: orderId,
+      createdAt,
+      customer: orderInput.customer || {},
+      shipping: { ...(orderInput.shipping || {}), method: shippingMethod },
+      payment: { ...(orderInput.payment || {}), method: paymentMethod },
+      totals: serverTotals,
+    };
+
+    // Cria cobrança no gateway configurado (Asaas quando ativo, ou Sandbox Simulado)
+    const charge = await createGatewayCharge({ order: initialOrderSkeleton, customerCpf: customerCpfPlain });
+
+    const finalPayment = {
+      method: paymentMethod,
+      ...(orderInput.payment?.brand ? { brand: String(orderInput.payment.brand).slice(0, 20) } : {}),
+      ...(orderInput.payment?.last4 ? { last4: String(orderInput.payment.last4).slice(-4) } : {}),
+      status: charge.paymentStatus,
+      provider: charge.provider,
+      ...(charge.chargeId ? { chargeId: charge.chargeId } : {}),
+      ...(charge.checkoutUrl ? { checkoutUrl: charge.checkoutUrl } : {}),
+      ...(charge.pixQrPayload ? { pixQrPayload: charge.pixQrPayload } : {}),
+      ...(charge.boletoLine ? { boletoLine: charge.boletoLine } : {}),
+    };
+
+    const finalStatus = charge.initialStatus;
+    const paidAt = finalStatus === "pago" ? createdAt : null;
+    const history = [
+      {
+        at: createdAt,
+        status: finalStatus,
+        note:
+          charge.provider === "asaas"
+            ? "Pedido criado e aguardando confirmação do gateway de pagamento."
+            : finalStatus === "pago"
+              ? "Pagamento aprovado (sandbox)."
+              : "Pedido criado.",
+      },
+    ];
+
     await client.query(
       `INSERT INTO public.orders
-       (id, user_id, customer_json, shipping_json, payment_json, coupon_code, totals_json, lead_days, status, history_json, is_demo, created_at, updated_at)
-       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7::jsonb,$8,$9,$10::jsonb,false,$11,NOW())
-       ON CONFLICT (id) DO NOTHING`,
+       (id, user_id, customer_json, shipping_json, payment_json, coupon_code, totals_json, lead_days, status, history_json,
+        payment_provider, gateway_charge_id, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, paid_at, is_demo, created_at, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7::jsonb,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,false,$17,NOW())`,
       [
-        order.id,
+        orderId,
         userId,
-        JSON.stringify(order.customer),
-        JSON.stringify(order.shipping),
-        JSON.stringify(order.payment),
-        order.coupon,
-        JSON.stringify(order.totals),
-        order.leadDays || 5,
-        order.status,
-        JSON.stringify(order.history || []),
-        order.createdAt,
+        JSON.stringify(orderInput.customer || {}),
+        JSON.stringify(initialOrderSkeleton.shipping),
+        JSON.stringify(finalPayment),
+        appliedCoupon,
+        JSON.stringify(serverTotals),
+        maxLead || 5,
+        finalStatus,
+        JSON.stringify(history),
+        charge.provider,
+        charge.chargeId,
+        charge.checkoutUrl,
+        charge.pixQrPayload,
+        charge.boletoLine,
+        paidAt,
+        createdAt,
       ]
     );
 
-    for (const it of order.items) {
-      const attList = Array.isArray(it.attachments) ? it.attachments : [];
+    for (const it of computedItems) {
       await client.query(
         `INSERT INTO public.order_items
          (order_id, product_id, name, image, mode, qty, unit_price, selections_json, photo_data, attachments_json)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::jsonb)`,
         [
-          order.id,
+          orderId,
           it.productId,
           it.name,
           it.image,
           it.mode,
           it.qty,
           it.unit,
-          JSON.stringify(it.selections || {}),
-          it.photo || null,
-          JSON.stringify(attList),
+          JSON.stringify(it.selections),
+          it.photo,
+          JSON.stringify(it.attachments),
         ]
       );
-      for (const att of attList) {
+      for (const att of it.attachments) {
         if (att && att.id) {
           await client.query(
             `UPDATE public.order_attachments
              SET order_id = $1,
                  expires_at = NOW() + INTERVAL '7 days'
              WHERE id = $2`,
-            [order.id, att.id]
+            [orderId, att.id]
           );
         }
       }
-      await client.query(
-        `UPDATE public.products
-         SET stock = GREATEST(0, COALESCE(stock, 0) - $1), updated_at = NOW()
-         WHERE id = $2 AND mode = 'pronta'`,
-        [it.qty, it.productId]
+      if (it.mode === "pronta") {
+        await client.query(
+          `UPDATE public.products
+           SET stock = GREATEST(0, COALESCE(stock, 0) - $1), updated_at = NOW()
+           WHERE id = $2`,
+          [it.qty, it.productId]
+        );
+      }
+    }
+
+    await writeAudit(client, {
+      requestId: requestId || "order",
+      actorId: userId,
+      action: "ORDER_CREATED",
+      details: { orderId, total: serverTotals.total, provider: charge.provider },
+    });
+
+    await client.query("COMMIT");
+
+    savedOrder = {
+      id: orderId,
+      createdAt,
+      customer: initialOrderSkeleton.customer,
+      shipping: initialOrderSkeleton.shipping,
+      payment: finalPayment,
+      coupon: appliedCoupon,
+      items: computedItems,
+      totals: serverTotals,
+      leadDays: maxLead || 5,
+      status: finalStatus,
+      history,
+    };
+    return savedOrder;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function processPaymentWebhookInPg({
+  provider,
+  eventId,
+  eventType,
+  orderId,
+  chargeId,
+  amountCents,
+  rawPayload,
+  requestId = null,
+}) {
+  await ensureDatabaseReady();
+  if (!eventId || !eventType || !orderId) {
+    throw orderValidationError("Webhook inválido: eventId, eventType e orderId são obrigatórios.", 400, "INVALID_WEBHOOK");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: ordRows } = await client.query(
+      "SELECT * FROM public.orders WHERE id = $1 FOR UPDATE",
+      [orderId]
+    );
+    const orderRow = ordRows[0];
+    if (!orderRow) {
+      throw orderValidationError("Pedido não encontrado para este webhook.", 404, "ORDER_NOT_FOUND");
+    }
+
+    const expectedTotal = Number(orderRow.totals_json?.total || 0);
+    const isPaidEvent = eventType === "PAYMENT_RECEIVED" || eventType === "PAYMENT_CONFIRMED";
+    const isCancelEvent = eventType === "PAYMENT_REFUNDED" || eventType === "PAYMENT_DELETED";
+
+    // Bloqueia fraude caso valor pago no webhook seja inferior ao total calculado no servidor
+    if (isPaidEvent && Number.isFinite(amountCents) && amountCents < expectedTotal) {
+      throw orderValidationError(
+        `Valor pago (${amountCents}) menor que o total do pedido (${expectedTotal}).`,
+        400,
+        "AMOUNT_MISMATCH"
       );
     }
+
+    // Idempotência estrita via UNIQUE (provider, event_id)
+    const { rows: inserted } = await client.query(
+      `INSERT INTO public.payment_webhook_events
+       (provider, event_id, event_type, order_id, gateway_charge_id, amount_cents, payload_json, processed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
+       ON CONFLICT (provider, event_id) DO NOTHING
+       RETURNING id`,
+      [
+        provider,
+        eventId,
+        eventType,
+        orderId,
+        chargeId,
+        Number.isFinite(amountCents) ? amountCents : null,
+        JSON.stringify(rawPayload || {}),
+      ]
+    );
+
+    if (inserted.length === 0) {
+      await client.query("COMMIT");
+      return { duplicate: true, orderId, status: orderRow.status };
+    }
+
+    let nextStatus = orderRow.status;
+    const paymentJson = { ...(orderRow.payment_json || {}) };
+    const history = Array.isArray(orderRow.history_json) ? [...orderRow.history_json] : [];
+    const nowIso = new Date().toISOString();
+
+    if (isPaidEvent && orderRow.status === "aguardando") {
+      nextStatus = "pago";
+      paymentJson.status = "aprovado";
+      paymentJson.provider = provider;
+      if (chargeId) paymentJson.chargeId = chargeId;
+      history.push({ at: nowIso, status: "pago", note: `Pagamento confirmado via webhook (${provider}).` });
+
+      await client.query(
+        `UPDATE public.orders
+         SET status = $1,
+             payment_json = $2::jsonb,
+             history_json = $3::jsonb,
+             gateway_charge_id = COALESCE($4, gateway_charge_id),
+             paid_at = COALESCE(paid_at, NOW()),
+             updated_at = NOW()
+         WHERE id = $5`,
+        [nextStatus, JSON.stringify(paymentJson), JSON.stringify(history), chargeId, orderId]
+      );
+    } else if (isCancelEvent && orderRow.status !== "cancelado") {
+      nextStatus = "cancelado";
+      paymentJson.status = eventType === "PAYMENT_REFUNDED" ? "estornado" : "cancelado";
+      history.push({ at: nowIso, status: "cancelado", note: `Pedido cancelado via webhook (${provider}).` });
+
+      const { rows: items } = await client.query(
+        "SELECT product_id, qty, mode FROM public.order_items WHERE order_id = $1",
+        [orderId]
+      );
+      for (const it of items) {
+        if (it.mode === "pronta") {
+          await client.query(
+            "UPDATE public.products SET stock = COALESCE(stock, 0) + $1, updated_at = NOW() WHERE id = $2",
+            [it.qty, it.product_id]
+          );
+        }
+      }
+
+      await client.query(
+        `UPDATE public.orders
+         SET status = $1,
+             payment_json = $2::jsonb,
+             history_json = $3::jsonb,
+             updated_at = NOW()
+         WHERE id = $4`,
+        [nextStatus, JSON.stringify(paymentJson), JSON.stringify(history), orderId]
+      );
+    }
+
+    await writeAudit(client, {
+      requestId: requestId || "webhook",
+      actorId: null,
+      action: "PAYMENT_WEBHOOK_PROCESSED",
+      details: { provider, eventId, eventType, orderId, nextStatus },
+    });
+
     await client.query("COMMIT");
+    return { duplicate: false, orderId, status: nextStatus };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

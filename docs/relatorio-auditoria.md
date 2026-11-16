@@ -78,8 +78,8 @@ Divergências do plano (comunicadas): (1) a sessão admin ficou em tabela própr
 | V4 Endpoint sensível sem authz | ✅ | Teste 0c percorre 14 rotas sem sessão → 401 |
 | V5 SQL concatenado | ✅ | todas as consultas novas parametrizadas |
 | V6 CVE alta/crítica | ✅ | `npm audit --omit=dev`: 0 vulnerabilidades |
-| **V7 Valor financeiro do cliente** | 🔴 **ABERTO (anterior a esta rodada)** | `createOrderInPg` grava `order.totals` vindo do navegador (`server/db.mjs`). Inofensivo na demo (pagamento simulado), **bloqueia produção com cobrança real** |
-| V8 Webhook sem assinatura | N/A | não há gateway de pagamento ainda |
+| **V7 Valor financeiro do cliente** | ✅ **FECHADO (Rodada 06 / LOG-014)** | `createOrderInPg` recalcula preços, adicionais, cupons e frete direto no PostgreSQL com trava `FOR UPDATE` e reserva atômica de estoque (`server/db.mjs`). |
+| V8 Webhook sem assinatura | ✅ **FECHADO (Rodada 06 / LOG-014)** | `POST /api/v1/webhooks/payment` exige `PAYMENT_WEBHOOK_SECRET` validado por `timingSafeEqual` (`asaas-access-token` ou HMAC-SHA256) e garante idempotência via tabela `payment_webhook_events`. |
 | V9 PII em log | ✅ | log de falha do `.ZIP` registra só `requestId`, pedido e código do erro |
 | **V10 Backup restaurado** | ⚪ **NÃO MEDIDO** | plano gratuito do Supabase; nenhum restore testado |
 | V11 Testes falhando | ✅ | `npm test`: 13/13 |

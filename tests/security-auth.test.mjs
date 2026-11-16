@@ -466,4 +466,109 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     const afterLogout = await fetch(`${baseUrl}/api/v1/admin/snapshot`, { headers: { Cookie: adminCookie } });
     assert.equal(afterLogout.status, 401);
   });
+
+  await t.test("9. Blindagem Financeira (V7) e Receptor de Webhooks Asaas com Idempotência", async () => {
+    const webhookSecret = "segredo_asaas_teste_2026_thais";
+    process.env.PAYMENT_WEBHOOK_SECRET = webhookSecret;
+
+    const fakeOrderId = `TP-2026-9${String(Date.now()).slice(-4)}`;
+    // Cliente mal-intencionado tenta enviar p01 (R$ 69,90) por 1 centavo (unit: 1, total: 1) e frete envio = 0
+    const resOrder = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: fakeOrderId,
+          customer: { name: "Teste Fraude Preco", email: "fraude@exemplo.com.br", phone: "(43) 99999-1111" },
+          shipping: { method: "envio", cep: "86010-150", street: "Rua A", number: "10", city: "Londrina", uf: "PR" },
+          payment: { method: "boleto", status: "aprovado" },
+          coupon: null,
+          items: [{ productId: "p01", qty: 1, unit: 1, selections: {} }],
+          totals: { subtotal: 1, discount: 0, shipping: 0, total: 1 },
+        },
+      }),
+    });
+    assert.equal(resOrder.status, 201);
+    const orderBody = await resOrder.json();
+
+    // O servidor recalculou tudo no PostgreSQL: p01 (6990) + frete padrão (1890) = 8880 centavos, e status = aguardando
+    assert.equal(orderBody.order.totals.subtotal, 6990);
+    assert.equal(orderBody.order.totals.shipping, 1890);
+    assert.equal(orderBody.order.totals.total, 8880);
+    assert.equal(orderBody.order.status, "aguardando");
+
+    const asaasEvent = {
+      id: `evt_asaas_${Date.now()}`,
+      event: "PAYMENT_RECEIVED",
+      payment: {
+        id: "pay_000005400000",
+        externalReference: fakeOrderId,
+        value: 88.8,
+      },
+    };
+
+    // a) Webhook sem segredo retorna 401
+    const whNoAuth = await fetch(`${baseUrl}/api/v1/webhooks/payment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(asaasEvent),
+    });
+    assert.equal(whNoAuth.status, 401);
+
+    // b) Webhook autenticado com valor adulterado menor (R$ 10,00) retorna 400
+    const whLowValue = await fetch(`${baseUrl}/api/v1/webhooks/payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "asaas-access-token": webhookSecret,
+      },
+      body: JSON.stringify({
+        ...asaasEvent,
+        id: `${asaasEvent.id}_low`,
+        payment: { ...asaasEvent.payment, value: 10.0 },
+      }),
+    });
+    assert.equal(whLowValue.status, 400);
+
+    // c) Webhook Asaas legítimo aprova o pedido no banco
+    const whValid = await fetch(`${baseUrl}/api/v1/webhooks/payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "asaas-access-token": webhookSecret,
+      },
+      body: JSON.stringify(asaasEvent),
+    });
+    assert.equal(whValid.status, 200);
+    const whBody = await whValid.json();
+    assert.equal(whBody.duplicate, false);
+    assert.equal(whBody.status, "pago");
+
+    // Confirma no PostgreSQL que o pedido virou 'pago' e gravou gateway_charge_id + paid_at
+    const { rows: ordCheck } = await pool.query(
+      "SELECT status, payment_json, gateway_charge_id, paid_at FROM public.orders WHERE id = $1",
+      [fakeOrderId]
+    );
+    assert.equal(ordCheck[0].status, "pago");
+    assert.equal(ordCheck[0].payment_json.status, "aprovado");
+    assert.equal(ordCheck[0].gateway_charge_id, "pay_000005400000");
+    assert.ok(ordCheck[0].paid_at);
+
+    // d) Reenvio idempotente do mesmo evento retorna duplicate: true sem reprocessar
+    const whDup = await fetch(`${baseUrl}/api/v1/webhooks/payment`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "asaas-access-token": webhookSecret,
+      },
+      body: JSON.stringify(asaasEvent),
+    });
+    assert.equal(whDup.status, 200);
+    const whDupBody = await whDup.json();
+    assert.equal(whDupBody.duplicate, true);
+
+    // Limpa pedido de teste e evento de webhook
+    await pool.query("DELETE FROM public.payment_webhook_events WHERE order_id = $1", [fakeOrderId]);
+    await pool.query("DELETE FROM public.orders WHERE id = $1", [fakeOrderId]);
+  });
 });

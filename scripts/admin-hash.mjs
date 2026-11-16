@@ -5,34 +5,37 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { Writable } from "node:stream";
 import { hashPassword } from "../server/crypto.mjs";
 
 const MIN_LENGTH = 12;
 const ENV_PATH = path.resolve(process.cwd(), ".env");
 
-// Uma única interface de leitura para todas as perguntas (abrir várias perde o que já foi digitado)
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
+// Uma única interface de leitura para todas as perguntas (abrir várias perde o que já foi digitado).
+// A saída passa por um "filtro mudo": enquanto a senha é digitada, nada do que o terminal ecoa é escrito,
+// nem os redesenhos de linha do readline (que repetem pergunta + texto digitado).
+let muted = false;
+const mutableOutput = new Writable({
+  write(chunk, encoding, callback) {
+    if (!muted) process.stdout.write(chunk, encoding);
+    callback();
+  },
+});
+const rl = readline.createInterface({ input: process.stdin, output: mutableOutput, terminal: process.stdin.isTTY });
 const pendingLines = [];
 const waitingResolvers = [];
-let hideTyping = false;
-let currentQuestion = "";
 
 rl.on("line", (line) => {
-  if (hideTyping && process.stdin.isTTY) rl.output.write("\n");
+  if (muted) process.stdout.write("\n");
   const resolve = waitingResolvers.shift();
   if (resolve) resolve(line.trim());
   else pendingLines.push(line.trim());
 });
-const writeOutput = rl._writeToOutput.bind(rl);
-rl._writeToOutput = (text) => {
-  if (!hideTyping || text.includes(currentQuestion)) writeOutput(text);
-};
 
 function ask(question, { hidden = false } = {}) {
-  hideTyping = hidden;
-  currentQuestion = question;
-  rl.setPrompt(question);
-  rl.prompt();
+  muted = false;
+  process.stdout.write(question);
+  muted = hidden;
   if (pendingLines.length) return Promise.resolve(pendingLines.shift());
   return new Promise((resolve) => waitingResolvers.push(resolve));
 }
@@ -57,6 +60,7 @@ process.stdout.write(`Configuração do acesso ao painel /painel-tp/\nA senha pr
 const email = (await ask("E-mail da administradora: ")).toLowerCase();
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
   process.stderr.write("E-mail inválido. Nada foi alterado.\n");
+  muted = false;
   rl.close();
   process.exit(1);
 }
@@ -76,6 +80,7 @@ for (let attempt = 1; attempt <= 3 && !password; attempt += 1) {
   password = typed;
 }
 
+muted = false;
 rl.close();
 if (!password) {
   process.stderr.write("Não foi possível definir a senha. Nada foi alterado.\n");

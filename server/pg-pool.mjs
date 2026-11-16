@@ -51,31 +51,28 @@ export async function pingKeepAlive(source = "interval") {
 }
 
 export async function seedEcommerceIfNeeded(client) {
-  const { rows: prodCount } = await client.query("SELECT COUNT(*)::int AS cnt FROM public.products");
-  if (prodCount[0].cnt === 0) {
-    for (const p of PRODUCTS) {
-      await client.query(
-        `INSERT INTO public.products
-         (id, slug, name, line, mode, price, stock, lead_days, featured, active, image, description, options_json)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          p.id,
-          p.slug,
-          p.name,
-          p.line,
-          p.mode,
-          p.price,
-          p.stock,
-          p.leadDays || 0,
-          Boolean(p.featured),
-          Boolean(p.active),
-          p.image,
-          p.description,
-          JSON.stringify(p.options || []),
-        ]
-      );
-    }
+  for (const p of PRODUCTS) {
+    await client.query(
+      `INSERT INTO public.products
+       (id, slug, name, line, mode, price, stock, lead_days, featured, active, image, description, options_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        p.id,
+        p.slug,
+        p.name,
+        p.line,
+        p.mode,
+        p.price,
+        p.stock,
+        p.leadDays || 0,
+        Boolean(p.featured),
+        Boolean(p.active),
+        p.image,
+        p.description,
+        JSON.stringify(p.options || []),
+      ]
+    );
   }
 
   const { rows: cupCount } = await client.query("SELECT COUNT(*)::int AS cnt FROM public.coupons");
@@ -153,6 +150,8 @@ export function ensureDatabaseReady() {
         "002_full_ecommerce_and_keepalive.sql",
         "003_order_attachments_ttl7d.sql",
         "004_admin_sessions.sql",
+        "005_site_content.sql",
+        "006_payments_and_financial_lock.sql",
       ];
       const client = await pool.connect();
       try {
@@ -161,6 +160,8 @@ export function ensureDatabaseReady() {
           await client.query(sql);
         }
         await seedEcommerceIfNeeded(client);
+        // Banco novo: a vitrine nasce com os destaques do catálogo de exemplo (no-op se já foi montada)
+        await client.query("SELECT public.backfill_home_showcase()");
       } finally {
         client.release();
       }

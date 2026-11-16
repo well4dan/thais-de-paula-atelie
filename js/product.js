@@ -3,7 +3,7 @@
 import { $, h, icon, clear, toast, params } from "./dom.js";
 import { money, businessDaysFromNow, date, waLink } from "./format.js";
 import * as store from "./store.js";
-import { modeTag, availability, productCard, selectionsSummary } from "./ui.js";
+import { modeTag, availability, productCard, selectionsSummary, isOnSale, productBadges } from "./ui.js";
 import { open as openCart } from "./cart.js";
 
 const slug = params().get("p") || "caderno-floral-personalizado";
@@ -74,6 +74,13 @@ function updatePriceAndPreview() {
   const unit = store.unitPrice(product, selections);
   const priceEl = $("#prod-price");
   if (priceEl) priceEl.textContent = money(unit * qty);
+  // Preço "de" acompanha os adicionais escolhidos e a quantidade
+  const wasEl = $("#prod-price-was");
+  if (wasEl && priceEl) {
+    const was = (product.compareAtPrice + (unit - product.price)) * qty;
+    wasEl.textContent = money(was);
+    priceEl.setAttribute("aria-label", `De ${money(was)} por ${money(unit * qty)}`);
+  }
 
   const badge = $("#prod-preview-badge");
   const mainImg = $("#prod-main-img");
@@ -297,6 +304,7 @@ function renderProduct() {
   root.append(
     h("div", { class: "bezel product-gallery" },
       h("div", { class: "bezel__core product-gallery__stage" },
+        productBadges(product),
         h("img", { id: "prod-main-img", src: product.image, alt: product.name, width: 800, height: 800 }),
         h("div", { class: "product-preview-badge", id: "prod-preview-badge", hidden: true }))),
     h("div", {},
@@ -304,7 +312,8 @@ function renderProduct() {
         modeTag(product),
         h("span", { class: "tag" }, icon("clock"), availability(product))),
       h("h1", { class: "section-title", style: "margin-top:0.75rem", text: product.name }),
-      h("p", { class: "price", id: "prod-price", style: "font-size:2rem;margin-top:0.6rem", text: money(product.price) }),
+      isOnSale(product) ? h("p", { class: "price__was", id: "prod-price-was", style: "font-size:var(--t-lg);margin-top:0.6rem", "aria-hidden": "true", text: money(product.compareAtPrice) }) : null,
+      h("p", { class: `price${isOnSale(product) ? " price--promo" : ""}`, id: "prod-price", style: `font-size:2rem;margin-top:${isOnSale(product) ? "0" : "0.6rem"}`, text: money(product.price) }),
       h("p", { class: "section-lead", style: "margin-top:0.75rem", text: product.description }),
       h("p", { class: "field__hint", style: "margin-top:0.6rem", text: `Previsão de ficar pronto ou sair do ateliê: até ${estDate}.` }),
       formEl));

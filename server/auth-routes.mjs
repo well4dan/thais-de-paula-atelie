@@ -16,8 +16,10 @@ import {
   getOrderTrackingInPg,
   getUserOrdersInPg,
   createOrderInPg,
+  processPaymentWebhookInPg,
   uploadOrderAttachmentInPg,
 } from "./db.mjs";
+import { verifyWebhookAuth, normalizeWebhookPayload } from "./payments.mjs";
 import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
@@ -31,6 +33,7 @@ import {
   checkRateLimit,
   parseCookies,
   sendJson,
+  readRawBody,
   readJsonBody,
   getClientIp,
   safeEqualStrings,
@@ -78,8 +81,29 @@ export async function handleApiRequest(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/v1/store/orders") {
       const body = await readJsonBody(req);
       const sess = await getSession(rawSessionToken);
-      await createOrderInPg(body.order, sess ? sess.userId : null);
-      return sendJson(res, 201, { ok: true, requestId });
+      const savedOrder = await createOrderInPg(body.order, sess ? sess.userId : null, requestId);
+      return sendJson(res, 201, { ok: true, order: savedOrder, requestId });
+    }
+
+    // Receptor oficial de Webhooks de Pagamento (Asaas / HMAC-SHA256) com verificação criptográfica e idempotência
+    if (req.method === "POST" && url.pathname === "/api/v1/webhooks/payment") {
+      const rawBody = await readRawBody(req, 512 * 1024);
+      if (!verifyWebhookAuth(req, rawBody)) {
+        return sendJson(res, 401, {
+          code: "INVALID_WEBHOOK_SIGNATURE",
+          message: "Assinatura ou token de webhook inválido.",
+          requestId,
+        });
+      }
+      let parsed = {};
+      try {
+        parsed = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        return sendJson(res, 400, { code: "BAD_JSON", message: "Payload JSON inválido.", requestId });
+      }
+      const norm = normalizeWebhookPayload(parsed);
+      const result = await processPaymentWebhookInPg({ ...norm, requestId });
+      return sendJson(res, 200, { ok: true, ...result, requestId });
     }
 
     // Upload das imagens originais das clientes (antes do pedido ser concluído; retenção de 7 dias)

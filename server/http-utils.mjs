@@ -49,7 +49,7 @@ export function sendJson(res, status, payload, extraHeaders = {}) {
   res.end(body);
 }
 
-export async function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
+export async function readRawBody(req, maxBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let total = 0;
     const chunks = [];
@@ -63,15 +63,19 @@ export async function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
       chunks.push(chunk);
     });
     req.on("end", () => {
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(Object.assign(new Error("JSON inválido na requisição."), { status: 400, code: "BAD_JSON" }));
-      }
+      resolve(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", reject);
   });
+}
+
+export async function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
+  const raw = await readRawBody(req, maxBytes);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw Object.assign(new Error("JSON inválido na requisição."), { status: 400, code: "BAD_JSON" });
+  }
 }
 
 export function getClientIp(req) {

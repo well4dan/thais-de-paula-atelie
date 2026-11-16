@@ -5,6 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { handleApiRequest } from "./server/auth-routes.mjs";
 import { ensureDatabaseReady, pingKeepAlive } from "./server/pg-pool.mjs";
+import { serveMedia } from "./server/media.mjs";
+import { getPublicSiteContent } from "./server/site-content.mjs";
 
 const ROOT = process.cwd();
 const PORT = Number(process.env.PORT || 8080);
@@ -44,6 +46,36 @@ function setSecurityHeaders(res, pathname) {
   }
 }
 
+// Páginas que recebem banners e popup (as demais públicas recebem só as faixas promocionais)
+const BANNER_PAGES = new Set(["/index.html", "/loja.html"]);
+const CONTENT_TIMEOUT_MS = 4000;
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms).unref())]);
+}
+
+// Injeta o conteúdo ativo do painel como JSON (não executável, a CSP segue sem 'unsafe-inline').
+// Sem banco ou com lentidão, a página sai com o conteúdo padrão do HTML.
+async function injectSiteContent(html, pagePath) {
+  const content = await withTimeout(getPublicSiteContent().catch(() => null), CONTENT_TIMEOUT_MS);
+  if (!content) return html;
+  const withBanners = BANNER_PAGES.has(pagePath);
+  const payload = {
+    announcements: content.announcements,
+    banners: withBanners ? content.banners : { topo: [], meio: [], popup: null },
+  };
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  let head = `<script type="application/json" id="site-content">${json}</script>\n`;
+  const firstHero = pagePath === "/index.html" ? payload.banners.topo[0] : null;
+  let out = html;
+  if (firstHero) {
+    head = `<link rel="preload" as="image" href="${firstHero.imageUrl}" fetchpriority="high">\n${head}`;
+    out = out.replace(/<html([^>]*)>/, (m, attrs) => `<html${attrs} data-hero-banner="">`);
+  }
+  // Função como substituição: o texto do conteúdo pode ter "$&" / "$'" (ex.: "R$'"), que o replace interpretaria
+  return out.replace("</head>", () => `${head}</head>`);
+}
+
 export function createAppServer() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -57,6 +89,17 @@ export function createAppServer() {
 
     if (url.pathname.startsWith("/api/")) {
       await handleApiRequest(req, res, url);
+      return;
+    }
+
+    const mediaMatch = url.pathname.match(/^\/media\/([0-9a-f]{64})\.webp$/);
+    if (mediaMatch && (req.method === "GET" || req.method === "HEAD")) {
+      try {
+        await serveMedia(req, res, mediaMatch[1]);
+      } catch {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+        res.end("Imagem indisponível no momento");
+      }
       return;
     }
 
@@ -93,6 +136,14 @@ export function createAppServer() {
     const cache = [".woff2", ".webp", ".png", ".jpg", ".svg", ".ico"].includes(ext)
       ? "public, max-age=604800"
       : "no-cache";
+
+    const pagePath = `/${path.relative(ROOT, filePath).split(path.sep).join("/")}`;
+    if (ext === ".html" && !pagePath.startsWith("/painel-tp/")) {
+      const html = await injectSiteContent(fs.readFileSync(filePath, "utf8"), pagePath);
+      res.writeHead(200, { "Content-Type": mime, "Cache-Control": cache });
+      res.end(html);
+      return;
+    }
 
     res.writeHead(200, { "Content-Type": mime, "Cache-Control": cache });
     fs.createReadStream(filePath).pipe(res);

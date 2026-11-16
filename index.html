@@ -32,6 +32,7 @@
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/site-content.css">
   <link rel="stylesheet" href="/css/overlays.css">
   <link rel="stylesheet" href="/css/layout.css">
   <script src="/js/boot.js"></script>
@@ -112,7 +113,7 @@
               <span>Explorar a loja</span>
               <span class="btn__dot"><svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
             </a>
-            <a class="btn btn--ghost btn--plain" href="#linhas">Conhecer as 8 linhas</a>
+            <a class="btn btn--ghost btn--plain" href="#linhas">Conhecer as 12 linhas</a>
           </div>
         </div>
 
@@ -157,11 +158,11 @@
       </div>
     </section>
 
-    <!-- As 8 linhas do flyer -->
+    <!-- As 12 linhas do ateliê -->
     <section class="section" id="linhas">
       <div class="container">
         <h2 class="section-title" data-reveal>Cada criação tem uma história para guardar</h2>
-        <p class="section-lead" data-reveal>Conheça as 8 linhas do ateliê. Clique em qualquer uma para filtrar na loja ou escolher como personalizar.</p>
+        <p class="section-lead" data-reveal>Conheça as 12 linhas do ateliê. Clique em qualquer uma para filtrar na loja ou escolher como personalizar.</p>
 
         <div class="bento-lines" data-reveal-group>
           <a class="bezel line-tile line-tile--wide" href="/loja.html?linha=cadernos" data-reveal data-tilt>
@@ -176,6 +177,66 @@
                   <p class="line-tile__desc">Capa dura com seu nome, tema floral ou delicado, wire-o dourado e miolo pautado, pontilhado ou liso.</p>
                 </div>
                 <span class="line-tile__cta">Ver cadernos <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
+              </div>
+            </div>
+          </a>
+
+          <a class="bezel line-tile" href="/loja.html?linha=agendas" data-reveal data-tilt>
+            <div class="bezel__core">
+              <div class="line-tile__media">
+                <img src="/img/p-agenda.webp" alt="Agenda diária personalizada com capa floral rosa e wire-o dourado" width="800" height="800" loading="lazy">
+              </div>
+              <div class="line-tile__body">
+                <div>
+                  <h3 class="line-tile__title">Agendas</h3>
+                  <p class="line-tile__desc">Datadas ou permanentes, capa dura laminada com seu nome e horários diários.</p>
+                </div>
+                <span class="line-tile__cta">Ver agendas <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
+              </div>
+            </div>
+          </a>
+
+          <a class="bezel line-tile" href="/loja.html?linha=planners" data-reveal data-tilt>
+            <div class="bezel__core">
+              <div class="line-tile__media">
+                <img src="/img/p-planner.webp" alt="Planner anual personalizado com abas divisórias e adesivos" width="800" height="800" loading="lazy">
+              </div>
+              <div class="line-tile__body">
+                <div>
+                  <h3 class="line-tile__title">Planners</h3>
+                  <p class="line-tile__desc">Planejamento anual, mensal e semanal com abas, finanças, metas e hábitos.</p>
+                </div>
+                <span class="line-tile__cta">Ver planners <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
+              </div>
+            </div>
+          </a>
+
+          <a class="bezel line-tile" href="/loja.html?linha=calendarios" data-reveal data-tilt>
+            <div class="bezel__core">
+              <div class="line-tile__media">
+                <img src="/img/p-calendario.webp" alt="Calendário de mesa personalizado com base rígida e flores em aquarela" width="800" height="800" loading="lazy">
+              </div>
+              <div class="line-tile__body">
+                <div>
+                  <h3 class="line-tile__title">Calendários</h3>
+                  <p class="line-tile__desc">Calendários de mesa ilustrados ou com 12 fotos suas para acompanhar o ano.</p>
+                </div>
+                <span class="line-tile__cta">Ver calendários <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
+              </div>
+            </div>
+          </a>
+
+          <a class="bezel line-tile" href="/loja.html?linha=maternidade" data-reveal data-tilt>
+            <div class="bezel__core">
+              <div class="line-tile__media">
+                <img src="/img/p-maternidade.webp" alt="Livro do bebê e maternidade personalizado em tons suaves" width="800" height="800" loading="lazy">
+              </div>
+              <div class="line-tile__body">
+                <div>
+                  <h3 class="line-tile__title">Livros de maternidade</h3>
+                  <p class="line-tile__desc">Livro do bebê e caderneta de saúde personalizada para guardar cada fase.</p>
+                </div>
+                <span class="line-tile__cta">Ver maternidade <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow-right"></use></svg></span>
               </div>
             </div>
           </a>
@@ -396,7 +457,7 @@
             <h2 class="section-title" data-reveal>Queridinhos da nossa vitrine</h2>
             <p class="section-lead" data-reveal>Adicione direto ao carrinho os itens a pronta entrega ou personalize os feitos sob encomenda.</p>
           </div>
-          <a class="btn btn--ghost btn--plain" href="/loja.html">Ver todos os 16 produtos</a>
+          <a class="btn btn--ghost btn--plain" href="/loja.html" data-all-products>Ver todos os produtos</a>
         </div>
 
         <div class="products-grid" id="featured-grid" aria-live="polite"></div>
@@ -461,10 +522,17 @@
           </details>
           <details class="faq-item" data-reveal>
             <summary>
+              <span>Qual é o prazo de entrega?</span>
+              <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-caret"></use></svg>
+            </summary>
+            <p>O prazo soma o tempo de preparo e o de transporte. Itens a pronta entrega saem do ateliê em até 2 dias úteis. Itens sob demanda levam de 3 a 7 dias úteis de produção, conforme a peça, e o prazo exato aparece na página de cada produto. Depois da postagem, o tempo dos Correios depende do seu CEP e da modalidade escolhida. Se preferir retirar, avisamos pelo WhatsApp assim que o pedido estiver pronto.</p>
+          </details>
+          <details class="faq-item" data-reveal>
+            <summary>
               <span>Como envio as fotos para polaroides, ímãs ou quadros em MDF?</span>
               <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-caret"></use></svg>
             </summary>
-            <p>Você pode anexar a foto principal diretamente na página do produto para já ver uma prévia. Para kits com várias fotos (como 10, 20 ou 30 polaroides), basta finalizar o pedido e enviar todas pelo nosso WhatsApp informando o número do pedido.</p>
+            <p>Você pode anexar a foto principal diretamente na página do produto. Para kits com várias fotos (como 10, 20 ou 30 polaroides), basta finalizar o pedido e enviar todas pelo nosso WhatsApp informando o número do pedido.</p>
           </details>
           <details class="faq-item" data-reveal>
             <summary>
@@ -529,6 +597,10 @@
           <h2>Linhas</h2>
           <ul>
             <li><a href="/loja.html?linha=cadernos">Cadernos personalizados</a></li>
+            <li><a href="/loja.html?linha=agendas">Agendas</a></li>
+            <li><a href="/loja.html?linha=planners">Planners</a></li>
+            <li><a href="/loja.html?linha=calendarios">Calendários</a></li>
+            <li><a href="/loja.html?linha=maternidade">Livros de maternidade</a></li>
             <li><a href="/loja.html?linha=blocos">Blocos de anotações</a></li>
             <li><a href="/loja.html?linha=lapis">Personalização de lápis</a></li>
             <li><a href="/loja.html?linha=polaroide">Fotos polaroide</a></li>
