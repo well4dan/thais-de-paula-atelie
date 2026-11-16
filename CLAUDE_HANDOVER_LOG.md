@@ -77,7 +77,8 @@
 │       ├── 003_order_attachments_ttl7d.sql      # Cofre temporário de imagens originais dos clientes (TTL 7 dias + expurgo SQL)
 │       ├── 004_admin_sessions.sql               # Sessões da administradora + remoção do adminPin das configurações
 │       ├── 005_site_content.sql                 # Mídia WebP, banners, faixas promocionais e vitrine
-│       └── 006_payments_and_financial_lock.sql  # Blindagem financeira, colunas do gateway e tabela payment_webhook_events (RLS)
+│       ├── 006_payments_and_financial_lock.sql  # Blindagem financeira, colunas do gateway e tabela payment_webhook_events (RLS)
+│       └── 007_coupon_usage_lock.sql            # Bloqueio de cupom de 1ª compra e registro único de uso por cliente (RLS)
 ├── tests/
 │   └── security-auth.test.mjs          # Testes automatizados oficiais (14/14 passando contra o Supabase em 06/11/2026)
 ├── docs/
@@ -242,6 +243,22 @@
   * `processPaymentWebhookInPg()` valida que o valor pago no webhook não é inferior ao total calculado pelo servidor, garante idempotência e atualiza status para `pago` (ou devolve estoque e cancela em estorno/exclusão).
 * **Nova Rota de Webhook ([server/auth-routes.mjs](server/auth-routes.mjs)):** `POST /api/v1/webhooks/payment`.
 * **Testes:** Adicionado Teste 9 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) provando bloqueio de fraude de preço no checkout e validação + idempotência do webhook Asaas.
+
+### [LOG-015] Bloqueio de Cupons de Primeira Compra e Cupons Já Utilizados
+* **Ação:** Implementada trava anti-abuso de cupons tanto no PostgreSQL quanto no checkout e no painel administrativo.
+* **Migração Aplicada:** [supabase/migrations/007_coupon_usage_lock.sql](supabase/migrations/007_coupon_usage_lock.sql):
+  * Novas colunas em `public.coupons`: `first_purchase_only` (`BEMVINDA10` marcado como `TRUE`), `single_use_per_customer` (`TRUE` por padrão), `max_uses`, `used_count`.
+  * Nova tabela `public.coupon_redemptions` com RLS ativa, registrando `(coupon_code, order_id, user_id, email_norm, phone_digits)`.
+* **Regras de Bloqueio ([server/db.mjs](server/db.mjs) `validateCouponEligibilityInPg`):**
+  * Cruza `user_id`, e-mail normalizado e telefone (apenas dígitos) contra pedidos reais não cancelados (`is_demo = FALSE AND status <> 'cancelado'`).
+  * Bloqueia com `HTTP 409` (`COUPON_ALREADY_USED`) qualquer tentativa de reutilizar um cupom já usado pelo mesmo cliente.
+  * Bloqueia com `HTTP 409` (`COUPON_FIRST_PURCHASE_ONLY`) qualquer cupom de primeira compra se o cliente já tiver pedido anterior real.
+  * Se um pedido for cancelado em `updateOrderStatusInPg`, o resgate é estornado automaticamente em `coupon_redemptions`.
+* **API, Checkout e Painel:**
+  * Rota `POST /api/v1/store/coupons/validate` em [server/auth-routes.mjs](server/auth-routes.mjs) para feedback imediato ao aplicar o cupom.
+  * [js/store.js](js/store.js) e [js/checkout.js](js/checkout.js) validam em tempo real com o servidor e impedem envio do pedido caso bloqueado.
+  * [js/admin/app.js](js/admin/app.js) ganhou checkbox `"Exclusivo 1ª compra"` e exibição das regras de uso por cliente.
+* **Testes:** Adicionado Teste 10 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) provando uso único na 1ª compra (`BEMVINDA10` OK → 2ª tentativa `409`), bloqueio de outro cupom de 1ª compra após já ter comprado e bloqueio de reuso de cupom comum (`ATELIE15`).
 
 ---
 

@@ -436,6 +436,8 @@ function renderCoupons(view) {
               type,
               value: type === "percent" ? rawVal : Math.round(rawVal * 100),
               minOrder: Math.round(Number($("#cp-min").value || 0) * 100),
+              firstPurchaseOnly: Boolean($("#cp-first")?.checked),
+              singleUsePerCustomer: true,
               active: true,
             });
             toast("Cupom salvo!");
@@ -453,13 +455,17 @@ function renderCoupons(view) {
             h("option", { value: "fixed", text: "Valor fixo (R$)" }))),
         h("div", { class: "field" }, h("label", { for: "cp-val", text: "Desconto" }), h("input", { class: "input", id: "cp-val", type: "number", value: "10", required: true })),
         h("div", { class: "field" }, h("label", { for: "cp-min", text: "Pedido mínimo (R$)" }), h("input", { class: "input", id: "cp-min", type: "number", value: "0" })),
+        h("label", { class: "check", style: "margin-bottom:0.5rem" },
+          h("input", { type: "checkbox", id: "cp-first" }),
+          h("span", { text: "Exclusivo 1ª compra" })),
         h("button", { class: "btn btn--sm", type: "submit" }, "Adicionar cupom")),
       h("table", { class: "admin-table" },
-        h("thead", {}, h("tr", {}, h("th", { text: "Código" }), h("th", { text: "Desconto" }), h("th", { text: "Mínimo" }), h("th", { text: "Ação" }))),
+        h("thead", {}, h("tr", {}, h("th", { text: "Código" }), h("th", { text: "Desconto" }), h("th", { text: "Mínimo" }), h("th", { text: "Regra" }), h("th", { text: "Ação" }))),
         h("tbody", {}, list.map((c) => h("tr", {},
           h("td", {}, h("strong", { text: c.code })),
           h("td", { text: c.type === "percent" ? `${c.value}%` : money(c.value) }),
           h("td", { text: money(c.minOrder) }),
+          h("td", { text: c.firstPurchaseOnly ? "1ª compra / 1x por cliente" : "1x por cliente" }),
           h("td", {}, h("button", {
             class: "btn btn--sm btn--ghost", type: "button",
             onclick: () => { store.removeCoupon(c.code); renderActiveTab(); },

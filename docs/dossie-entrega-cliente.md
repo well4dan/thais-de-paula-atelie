@@ -204,6 +204,9 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 2. **Estrutura Pronta para Gateway (Asaas / PIX / Cartão / Boleto):**
    * Criado o módulo [server/payments.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/payments.mjs) já compatível com a API oficial do **Asaas** (e operável em modo simulação até que a conta da cliente seja conectada no `.env`).
    * Implementado o receptor oficial de notificações automáticas de pagamento (**Webhook `POST /api/v1/webhooks/payment`**) com validação criptográfica (`asaas-access-token` e `HMAC-SHA256`), conferência do valor pago e tabela `payment_webhook_events` para nunca processar um mesmo pagamento duas vezes.
+3. **Bloqueio de Cupons de Primeira Compra e Cupons Já Utilizados (`007_coupon_usage_lock.sql`):**
+   * Cupons marcados como **Exclusivo 1ª compra** (como `BEMVINDA10`) são bloqueados automaticamente se o cliente (por conta logada, e-mail ou WhatsApp) já possuir qualquer pedido real anterior.
+   * Cupons marcados como **uso único por cliente** (como `ATELIE15`) são gravados na tabela `coupon_redemptions` e bloqueados em tentativas de reutilização pela mesma pessoa. Se um pedido for cancelado, o sistema libera o cupom automaticamente.
 
 ---
 

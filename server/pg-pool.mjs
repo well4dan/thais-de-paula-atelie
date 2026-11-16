@@ -75,16 +75,21 @@ export async function seedEcommerceIfNeeded(client) {
     );
   }
 
-  const { rows: cupCount } = await client.query("SELECT COUNT(*)::int AS cnt FROM public.coupons");
-  if (cupCount[0].cnt === 0) {
-    for (const c of COUPONS) {
-      await client.query(
-        `INSERT INTO public.coupons (code, type, value, min_order, active)
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (code) DO NOTHING`,
-        [c.code, c.type, c.value, c.minOrder || 0, Boolean(c.active)]
-      );
-    }
+  for (const c of COUPONS) {
+    await client.query(
+      `INSERT INTO public.coupons (code, type, value, min_order, active, first_purchase_only, single_use_per_customer)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (code) DO NOTHING`,
+      [
+        c.code,
+        c.type,
+        c.value,
+        c.minOrder || 0,
+        Boolean(c.active),
+        Boolean(c.firstPurchaseOnly),
+        c.singleUsePerCustomer !== false,
+      ]
+    );
   }
 
   const { rows: setCount } = await client.query("SELECT COUNT(*)::int AS cnt FROM public.store_settings");
@@ -152,6 +157,7 @@ export function ensureDatabaseReady() {
         "004_admin_sessions.sql",
         "005_site_content.sql",
         "006_payments_and_financial_lock.sql",
+        "007_coupon_usage_lock.sql",
       ];
       const client = await pool.connect();
       try {

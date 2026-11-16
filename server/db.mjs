@@ -416,7 +416,17 @@ function mapProductRow(r) {
 }
 
 function mapCouponRow(c) {
-  return { code: c.code, type: c.type, value: c.value, minOrder: c.min_order, active: c.active };
+  return {
+    code: c.code,
+    type: c.type,
+    value: c.value,
+    minOrder: c.min_order,
+    active: c.active,
+    firstPurchaseOnly: Boolean(c.first_purchase_only),
+    singleUsePerCustomer: c.single_use_per_customer !== false,
+    maxUses: c.max_uses || null,
+    usedCount: Number(c.used_count || 0),
+  };
 }
 
 function withoutPrivateSettings(settingsJson) {
@@ -652,16 +662,143 @@ export async function deleteProductInPg(id) {
 
 export async function upsertCouponInPg(c) {
   await ensureDatabaseReady();
+  const code = String(c.code || "").trim().toUpperCase();
   await pool.query(
-    `INSERT INTO public.coupons (code, type, value, min_order, active)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO public.coupons (code, type, value, min_order, active, first_purchase_only, single_use_per_customer, max_uses)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (code) DO UPDATE SET
        type = EXCLUDED.type,
        value = EXCLUDED.value,
        min_order = EXCLUDED.min_order,
-       active = EXCLUDED.active`,
-    [c.code, c.type, c.value, c.minOrder || 0, Boolean(c.active)]
+       active = EXCLUDED.active,
+       first_purchase_only = EXCLUDED.first_purchase_only,
+       single_use_per_customer = EXCLUDED.single_use_per_customer,
+       max_uses = EXCLUDED.max_uses`,
+    [
+      code,
+      c.type,
+      c.value,
+      c.minOrder || 0,
+      Boolean(c.active),
+      Boolean(c.firstPurchaseOnly),
+      c.singleUsePerCustomer !== false,
+      c.maxUses ? Number(c.maxUses) : null,
+    ]
   );
+}
+
+export async function validateCouponEligibilityInPg(
+  clientOrPool,
+  { code, subtotal = null, userId = null, email = "", phone = "", lockCoupon = false }
+) {
+  const runner = clientOrPool || pool;
+  const rawCode = String(code || "").trim().toUpperCase();
+  if (!rawCode) {
+    throw orderValidationError("Informe um código de cupom.", 422, "INVALID_COUPON");
+  }
+
+  const sqlCup = lockCoupon
+    ? "SELECT * FROM public.coupons WHERE code = $1 FOR UPDATE"
+    : "SELECT * FROM public.coupons WHERE code = $1";
+  const { rows: cupRows } = await runner.query(sqlCup, [rawCode]);
+  const cup = cupRows[0];
+  if (!cup || !cup.active) {
+    throw orderValidationError("Cupom inválido ou expirado.", 422, "INVALID_COUPON");
+  }
+  if (cup.max_uses !== null && Number(cup.used_count || 0) >= Number(cup.max_uses)) {
+    throw orderValidationError("Este cupom atingiu o limite máximo de utilizações.", 409, "COUPON_MAX_USES");
+  }
+  if (subtotal !== null && subtotal < Number(cup.min_order || 0)) {
+    const minStr = (Number(cup.min_order) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    throw orderValidationError(`Cupom válido para pedidos a partir de ${minStr}.`, 422, "COUPON_MIN_ORDER");
+  }
+
+  const emailSet = new Set();
+  const phoneSet = new Set();
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (cleanEmail) emailSet.add(cleanEmail);
+  const cleanPhone = String(phone || "").replace(/\D+/g, "");
+  if (cleanPhone.length >= 8) phoneSet.add(cleanPhone);
+
+  if (userId) {
+    const { rows: uRows } = await runner.query(
+      "SELECT email, phone FROM public.users WHERE id = $1 AND deleted_at IS NULL",
+      [userId]
+    );
+    if (uRows[0]?.email) emailSet.add(String(uRows[0].email).trim().toLowerCase());
+    const uPhone = String(uRows[0]?.phone || "").replace(/\D+/g, "");
+    if (uPhone.length >= 8) phoneSet.add(uPhone);
+  }
+
+  const emails = [...emailSet];
+  const phones = [...phoneSet];
+  const hasCustomerKey = Boolean(userId) || emails.length > 0 || phones.length > 0;
+
+  if (hasCustomerKey && cup.single_use_per_customer !== false) {
+    const { rows: usedRows } = await runner.query(
+      `SELECT 1 FROM public.orders o
+       WHERE o.is_demo = FALSE
+         AND o.status <> 'cancelado'
+         AND UPPER(COALESCE(o.coupon_code, '')) = $1
+         AND (
+           ($2::uuid IS NOT NULL AND o.user_id = $2::uuid)
+           OR (array_length($3::text[], 1) > 0 AND LOWER(COALESCE(o.customer_json->>'email', '')) = ANY($3::text[]))
+           OR (array_length($4::text[], 1) > 0 AND regexp_replace(COALESCE(o.customer_json->>'phone', ''), '\\D', '', 'g') = ANY($4::text[]))
+         )
+       LIMIT 1`,
+      [rawCode, userId, emails, phones]
+    );
+    const { rows: redRows } = await runner.query(
+      `SELECT 1 FROM public.coupon_redemptions cr
+       JOIN public.orders o ON o.id = cr.order_id
+       WHERE cr.coupon_code = $1
+         AND o.status <> 'cancelado'
+         AND (
+           ($2::uuid IS NOT NULL AND cr.user_id = $2::uuid)
+           OR (array_length($3::text[], 1) > 0 AND cr.email_norm = ANY($3::text[]))
+           OR (array_length($4::text[], 1) > 0 AND cr.phone_digits = ANY($4::text[]))
+         )
+       LIMIT 1`,
+      [rawCode, userId, emails, phones]
+    );
+    if (usedRows.length > 0 || redRows.length > 0) {
+      throw orderValidationError(
+        `O cupom ${rawCode} já foi utilizado por você anteriormente e está bloqueado para novas compras.`,
+        409,
+        "COUPON_ALREADY_USED"
+      );
+    }
+  }
+
+  if (hasCustomerKey && cup.first_purchase_only) {
+    const { rows: prevOrders } = await runner.query(
+      `SELECT id FROM public.orders o
+       WHERE o.is_demo = FALSE
+         AND o.status <> 'cancelado'
+         AND (
+           ($1::uuid IS NOT NULL AND o.user_id = $1::uuid)
+           OR (array_length($2::text[], 1) > 0 AND LOWER(COALESCE(o.customer_json->>'email', '')) = ANY($2::text[]))
+           OR (array_length($3::text[], 1) > 0 AND regexp_replace(COALESCE(o.customer_json->>'phone', ''), '\\D', '', 'g') = ANY($3::text[]))
+         )
+       LIMIT 1`,
+      [userId, emails, phones]
+    );
+    if (prevOrders.length > 0) {
+      throw orderValidationError(
+        `O cupom ${rawCode} é exclusivo para a primeira compra e já consta um pedido anterior no seu cadastro.`,
+        409,
+        "COUPON_FIRST_PURCHASE_ONLY"
+      );
+    }
+  }
+
+  const baseSub = subtotal === null ? 0 : subtotal;
+  const discount =
+    cup.type === "percent"
+      ? Math.round((baseSub * Number(cup.value)) / 100)
+      : Math.min(Number(cup.value), baseSub);
+
+  return { coupon: mapCouponRow(cup), discount, primaryEmail: emails[0] || "", primaryPhone: phones[0] || "" };
 }
 
 export async function deleteCouponInPg(code) {
@@ -777,23 +914,23 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       });
     }
 
-    // Valida e aplica cupom exclusivamente no servidor
+    // Valida e aplica cupom exclusivamente no servidor (bloqueia primeira compra repetida e cupom já utilizado)
     let appliedCoupon = null;
     let discount = 0;
+    let couponCustomerMeta = null;
     const rawCoupon = String(orderInput.coupon || "").trim().toUpperCase();
     if (rawCoupon) {
-      const { rows: cupRows } = await client.query(
-        "SELECT code, type, value, min_order, active FROM public.coupons WHERE code = $1",
-        [rawCoupon]
-      );
-      const cup = cupRows[0];
-      if (cup && cup.active && subtotal >= Number(cup.min_order || 0)) {
-        appliedCoupon = cup.code;
-        discount =
-          cup.type === "percent"
-            ? Math.round((subtotal * Number(cup.value)) / 100)
-            : Math.min(Number(cup.value), subtotal);
-      }
+      const checked = await validateCouponEligibilityInPg(client, {
+        code: rawCoupon,
+        subtotal,
+        userId,
+        email: orderInput.customer?.email || "",
+        phone: orderInput.customer?.phone || "",
+        lockCoupon: true,
+      });
+      appliedCoupon = checked.coupon.code;
+      discount = checked.discount;
+      couponCustomerMeta = checked;
     }
 
     const shippingMethod = orderInput.shipping?.method === "envio" ? "envio" : "retirada";
@@ -893,6 +1030,26 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
         createdAt,
       ]
     );
+
+    if (appliedCoupon) {
+      await client.query(
+        `INSERT INTO public.coupon_redemptions
+         (coupon_code, order_id, user_id, email_norm, phone_digits, created_at)
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         ON CONFLICT (coupon_code, order_id) DO NOTHING`,
+        [
+          appliedCoupon,
+          orderId,
+          userId,
+          couponCustomerMeta?.primaryEmail || String(orderInput.customer?.email || "").trim().toLowerCase(),
+          couponCustomerMeta?.primaryPhone || String(orderInput.customer?.phone || "").replace(/\D+/g, ""),
+        ]
+      );
+      await client.query(
+        "UPDATE public.coupons SET used_count = used_count + 1 WHERE code = $1",
+        [appliedCoupon]
+      );
+    }
 
     for (const it of computedItems) {
       await client.query(
@@ -1322,12 +1479,39 @@ export async function runExpiredAttachmentsPurgeInPg() {
 
 export async function updateOrderStatusInPg({ id, status, payment, history }) {
   await ensureDatabaseReady();
-  await pool.query(
-    `UPDATE public.orders
-     SET status = $1, payment_json = $2::jsonb, history_json = $3::jsonb, updated_at = NOW()
-     WHERE id = $4`,
-    [status, JSON.stringify(payment), JSON.stringify(history), id]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: prevRows } = await client.query(
+      "SELECT status, coupon_code FROM public.orders WHERE id = $1 FOR UPDATE",
+      [id]
+    );
+    const prev = prevRows[0];
+    await client.query(
+      `UPDATE public.orders
+       SET status = $1, payment_json = $2::jsonb, history_json = $3::jsonb, updated_at = NOW()
+       WHERE id = $4`,
+      [status, JSON.stringify(payment), JSON.stringify(history), id]
+    );
+    if (prev && status === "cancelado" && prev.status !== "cancelado") {
+      const { rows: deletedRed } = await client.query(
+        "DELETE FROM public.coupon_redemptions WHERE order_id = $1 RETURNING coupon_code",
+        [id]
+      );
+      if (deletedRed[0]?.coupon_code) {
+        await client.query(
+          "UPDATE public.coupons SET used_count = GREATEST(0, used_count - 1) WHERE code = $1",
+          [deletedRed[0].coupon_code]
+        );
+      }
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function resetDemoInPg() {

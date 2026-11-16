@@ -11,11 +11,24 @@ const state = {
   shippingMethod: "retirada",
   payMethod: "pix",
   couponCode: "",
+  serverCouponError: "",
 };
+
+function currentCustomerHint() {
+  return {
+    email: ($("#c-email")?.value || "").trim(),
+    phone: ($("#c-phone")?.value || "").trim(),
+  };
+}
 
 function renderSummary() {
   const box = clear($("#checkout-summary"));
-  const totals = store.computeTotals({ couponCode: state.couponCode, shippingMethod: state.shippingMethod });
+  const totals = store.computeTotals({
+    couponCode: state.couponCode,
+    shippingMethod: state.shippingMethod,
+    customer: currentCustomerHint(),
+    serverCouponError: state.serverCouponError,
+  });
 
   if (!totals.rows.length) {
     box.append(h("div", { class: "empty" },
@@ -172,12 +185,40 @@ $$("[data-pay-method]").forEach((btn) => {
   });
 });
 
+async function checkCouponWithServer() {
+  state.serverCouponError = "";
+  const code = state.couponCode;
+  if (!code) {
+    renderSummary();
+    return;
+  }
+  const baseTotals = store.computeTotals({ shippingMethod: state.shippingMethod });
+  const { email, phone } = currentCustomerHint();
+  const check = await store.validateCouponOnServer({
+    code,
+    subtotal: baseTotals.subtotal,
+    email,
+    phone,
+  });
+  if (!check.ok) {
+    state.serverCouponError = check.message || "Cupom bloqueado para este cadastro.";
+  }
+  renderSummary();
+}
+
 $("#apply-coupon")?.addEventListener("click", () => {
   state.couponCode = ($("#coupon-input")?.value || "").trim();
-  renderSummary();
+  checkCouponWithServer();
 });
 
-$("#checkout-form")?.addEventListener("submit", (e) => {
+$("#c-email")?.addEventListener("change", () => {
+  if (state.couponCode) checkCouponWithServer();
+});
+$("#c-phone")?.addEventListener("change", () => {
+  if (state.couponCode) checkCouponWithServer();
+});
+
+$("#checkout-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   // Honeypot anti-bot
   if ($("#c-website")?.value) return;
@@ -212,11 +253,19 @@ $("#checkout-form")?.addEventListener("submit", (e) => {
     payment = { method: "boleto", status: "pendente" };
   }
 
+  const btnSubmit = $("#checkout-submit");
+  if (btnSubmit) btnSubmit.setAttribute("disabled", "true");
   try {
-    const order = store.createOrder({ customer, shipping, payment, couponCode: state.couponCode });
+    const order = await store.createOrder({ customer, shipping, payment, couponCode: state.couponCode });
     location.href = `/pedido.html?id=${encodeURIComponent(order.id)}`;
   } catch (err) {
+    if (err.code && String(err.code).startsWith("COUPON")) {
+      state.serverCouponError = err.message;
+      renderSummary();
+    }
     toast(err.message, "error");
+  } finally {
+    if (btnSubmit) btnSubmit.removeAttribute("disabled");
   }
 });
 

@@ -256,8 +256,8 @@ export const PRODUCTS = [
 ];
 
 export const COUPONS = [
-  { code: "BEMVINDA10", type: "percent", value: 10, minOrder: 0, active: true },
-  { code: "ATELIE15", type: "fixed", value: 1500, minOrder: 12000, active: true },
+  { code: "BEMVINDA10", type: "percent", value: 10, minOrder: 0, active: true, firstPurchaseOnly: true, singleUsePerCustomer: true },
+  { code: "ATELIE15", type: "fixed", value: 1500, minOrder: 12000, active: true, firstPurchaseOnly: false, singleUsePerCustomer: true },
 ];
 
 export const SETTINGS = {

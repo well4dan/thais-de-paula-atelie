@@ -18,7 +18,9 @@ import {
   createOrderInPg,
   processPaymentWebhookInPg,
   uploadOrderAttachmentInPg,
+  validateCouponEligibilityInPg,
 } from "./db.mjs";
+import { ensureDatabaseReady, pool } from "./pg-pool.mjs";
 import { verifyWebhookAuth, normalizeWebhookPayload } from "./payments.mjs";
 import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
@@ -83,6 +85,30 @@ export async function handleApiRequest(req, res, url) {
       const sess = await getSession(rawSessionToken);
       const savedOrder = await createOrderInPg(body.order, sess ? sess.userId : null, requestId);
       return sendJson(res, 201, { ok: true, order: savedOrder, requestId });
+    }
+
+    // Validação em tempo real de cupom (bloqueia cupom já usado ou de primeira compra fora de elegibilidade)
+    if (req.method === "POST" && url.pathname === "/api/v1/store/coupons/validate") {
+      const rl = checkRateLimit(`coupon:${ip}`, 40, 15 * 60 * 1000);
+      if (!rl.allowed) {
+        return sendJson(
+          res,
+          429,
+          { code: "RATE_LIMITED", message: "Muitas validações de cupom seguidas. Aguarde alguns minutos.", requestId },
+          { "Retry-After": String(rl.retryAfterSec) }
+        );
+      }
+      const body = await readJsonBody(req);
+      const sess = await getSession(rawSessionToken);
+      await ensureDatabaseReady();
+      const result = await validateCouponEligibilityInPg(pool, {
+        code: body.code,
+        subtotal: body.subtotal !== undefined && body.subtotal !== null ? Number(body.subtotal) : null,
+        userId: sess ? sess.userId : null,
+        email: body.email || "",
+        phone: body.phone || "",
+      });
+      return sendJson(res, 200, { ok: true, coupon: result.coupon, discount: result.discount, requestId });
     }
 
     // Receptor oficial de Webhooks de Pagamento (Asaas / HMAC-SHA256) com verificação criptográfica e idempotência

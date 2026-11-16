@@ -571,4 +571,127 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     await pool.query("DELETE FROM public.payment_webhook_events WHERE order_id = $1", [fakeOrderId]);
     await pool.query("DELETE FROM public.orders WHERE id = $1", [fakeOrderId]);
   });
+
+  await t.test("10. Bloqueia cupons de primeira compra após 1º pedido e cupons já utilizados pelo cliente", async () => {
+    const suffix = String(Date.now()).slice(-5);
+    const clientEmail = `cupom.teste.${suffix}@exemplo.com.br`;
+    const clientPhone = `(43) 98${suffix.slice(0, 3)}-${suffix.slice(1, 5)}`;
+    const order1Id = `TP-2026-C1${suffix.slice(-3)}`;
+    const order2Id = `TP-2026-C2${suffix.slice(-3)}`;
+    const order3Id = `TP-2026-C3${suffix.slice(-3)}`;
+    const extraFirstCoupon = `PRIMEIRA${suffix.slice(-3)}`;
+
+    await pool.query(
+      `INSERT INTO public.coupons (code, type, value, min_order, active, first_purchase_only, single_use_per_customer)
+       VALUES ($1, 'percent', 15, 0, true, true, true)
+       ON CONFLICT (code) DO NOTHING`,
+      [extraFirstCoupon]
+    );
+
+    // 10a. Primeira compra com BEMVINDA10 (primeira compra) deve funcionar (201)
+    const r1 = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: order1Id,
+          customer: { name: "Cliente Cupom", email: clientEmail, phone: clientPhone },
+          shipping: { method: "retirada" },
+          payment: { method: "pix", status: "aprovado" },
+          coupon: "BEMVINDA10",
+          items: [{ productId: "p01", qty: 1, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(r1.status, 201);
+    const b1 = await r1.json();
+    assert.equal(b1.order.coupon, "BEMVINDA10");
+    assert.equal(b1.order.totals.discount, 699); // 10% de 6990
+
+    // 10b. Reutilizar BEMVINDA10 pela mesma cliente deve ser bloqueado com 409
+    const valUsed = await fetch(`${baseUrl}/api/v1/store/coupons/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "BEMVINDA10", subtotal: 6990, email: clientEmail, phone: clientPhone }),
+    });
+    assert.equal(valUsed.status, 409);
+
+    const r2Blocked = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: order2Id,
+          customer: { name: "Cliente Cupom", email: clientEmail, phone: clientPhone },
+          shipping: { method: "retirada" },
+          payment: { method: "pix", status: "aprovado" },
+          coupon: "BEMVINDA10",
+          items: [{ productId: "p01", qty: 1, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(r2Blocked.status, 409);
+
+    // 10c. Tentar usar OUTRO cupom de primeira compra na 2ª compra também deve ser bloqueado (409)
+    const r3FirstBlocked = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: order2Id,
+          customer: { name: "Cliente Cupom", email: clientEmail, phone: clientPhone },
+          shipping: { method: "retirada" },
+          payment: { method: "pix", status: "aprovado" },
+          coupon: extraFirstCoupon,
+          items: [{ productId: "p01", qty: 1, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(r3FirstBlocked.status, 409);
+    const errFirst = await r3FirstBlocked.json();
+    assert.equal(errFirst.code, "COUPON_FIRST_PURCHASE_ONLY");
+
+    // 10d. Usar ATELIE15 (não exclusivo de 1ª compra, mas 1x por cliente) em pedido > R$ 120: 1ª vez OK (201), 2ª vez bloqueado (409)
+    const rAtelie1 = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: order2Id,
+          customer: { name: "Cliente Cupom", email: clientEmail, phone: clientPhone },
+          shipping: { method: "retirada" },
+          payment: { method: "pix", status: "aprovado" },
+          coupon: "ATELIE15",
+          items: [{ productId: "p01", qty: 2, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(rAtelie1.status, 201);
+
+    const rAtelie2Blocked = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: order3Id,
+          customer: { name: "Cliente Cupom", email: clientEmail, phone: clientPhone },
+          shipping: { method: "retirada" },
+          payment: { method: "pix", status: "aprovado" },
+          coupon: "ATELIE15",
+          items: [{ productId: "p01", qty: 2, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(rAtelie2Blocked.status, 409);
+    const errUsed = await rAtelie2Blocked.json();
+    assert.equal(errUsed.code, "COUPON_ALREADY_USED");
+
+    // Limpeza dos dados de teste e restauração dos contadores
+    await pool.query("DELETE FROM public.coupon_redemptions WHERE order_id IN ($1, $2)", [order1Id, order2Id]);
+    await pool.query("DELETE FROM public.orders WHERE id IN ($1, $2)", [order1Id, order2Id]);
+    await pool.query("DELETE FROM public.coupons WHERE code = $1", [extraFirstCoupon]);
+    await pool.query(
+      "UPDATE public.coupons c SET used_count = (SELECT COUNT(*)::int FROM public.coupon_redemptions cr WHERE cr.coupon_code = c.code)"
+    );
+  });
 });

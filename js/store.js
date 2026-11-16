@@ -290,8 +290,19 @@ export function saveSettings(patch) {
   bgSync("/api/v1/store/settings", "PUT", { settings: next });
 }
 
+function matchesCustomerOrder(order, email = "", phone = "") {
+  if (!order || order.demo || order.status === "cancelado") return false;
+  const normEmail = String(email || "").trim().toLowerCase();
+  const normPhone = String(phone || "").replace(/\D+/g, "");
+  const oEmail = String(order.customer?.email || "").trim().toLowerCase();
+  const oPhone = String(order.customer?.phone || "").replace(/\D+/g, "");
+  if (normEmail && oEmail && normEmail === oEmail) return true;
+  if (normPhone.length >= 8 && oPhone && normPhone === oPhone) return true;
+  return false;
+}
+
 /* Totais */
-export function computeTotals({ items = cart(), couponCode = "", shippingMethod = "retirada" } = {}) {
+export function computeTotals({ items = cart(), couponCode = "", shippingMethod = "retirada", customer = null, serverCouponError = "" } = {}) {
   const cfg = settings();
   const errors = [];
   const rows = [];
@@ -308,18 +319,50 @@ export function computeTotals({ items = cart(), couponCode = "", shippingMethod 
   const subtotal = rows.reduce((s, r) => s + r.total, 0);
   let discount = 0;
   let coupon = null;
-  let couponError = "";
+  let couponError = serverCouponError || "";
   if (couponCode) {
     coupon = findCoupon(couponCode);
     if (!coupon) couponError = "Cupom inválido ou expirado.";
-    else if (subtotal < coupon.minOrder) {
+    else if (serverCouponError) {
+      coupon = null;
+    } else if (subtotal < coupon.minOrder) {
       couponError = `Cupom válido para pedidos a partir de ${(coupon.minOrder / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`;
       coupon = null;
-    } else discount = coupon.type === "percent" ? Math.round((subtotal * coupon.value) / 100) : Math.min(coupon.value, subtotal);
+    } else if (customer) {
+      const myRealOrders = read(KEYS.orders, []).filter((o) => matchesCustomerOrder(o, customer.email, customer.phone));
+      if (coupon.singleUsePerCustomer !== false && myRealOrders.some((o) => String(o.coupon || "").toUpperCase() === coupon.code)) {
+        couponError = `O cupom ${coupon.code} já foi utilizado por você e não pode ser reaplicado.`;
+        coupon = null;
+      } else if (coupon.firstPurchaseOnly && myRealOrders.length > 0) {
+        couponError = `O cupom ${coupon.code} é válido apenas na primeira compra.`;
+        coupon = null;
+      }
+    }
+    if (coupon && !couponError) {
+      discount = coupon.type === "percent" ? Math.round((subtotal * coupon.value) / 100) : Math.min(coupon.value, subtotal);
+    }
   }
   const shipping = shippingMethod === "envio" && subtotal - discount < cfg.freeShippingMin ? cfg.shippingFlat : 0;
   const maxLead = rows.reduce((m, r) => Math.max(m, r.product.mode === "demanda" ? r.product.leadDays : cfg.readyShipDays), 0);
   return { rows, subtotal, discount, coupon, couponError, shipping, total: subtotal - discount + shipping, errors, maxLead };
+}
+
+export async function validateCouponOnServer({ code, subtotal, email, phone }) {
+  if (!code || typeof fetch !== "function") return { ok: true };
+  try {
+    const res = await fetch("/api/v1/store/coupons/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ code, subtotal, email, phone }),
+    });
+    if (res.status === 404 || res.status === 405 || res.status === 501) return { ok: true, offline: true };
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, message: data.message || "Cupom indisponível para este cadastro.", code: data.code };
+    return { ok: true, coupon: data.coupon, discount: data.discount };
+  } catch {
+    return { ok: true, offline: true };
+  }
 }
 
 /* Pedidos */
@@ -332,14 +375,15 @@ function nextOrderId(list) {
   return `TP-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
-export function createOrder({ customer, shipping, payment, couponCode }) {
-  const totals = computeTotals({ couponCode, shippingMethod: shipping.method });
+export async function createOrder({ customer, shipping, payment, couponCode }) {
+  const totals = computeTotals({ couponCode, shippingMethod: shipping.method, customer });
   if (!totals.rows.length) throw new StoreError("empty", "Seu carrinho está vazio.");
   if (totals.errors.length) throw new StoreError("stock", totals.errors[0]);
+  if (couponCode && totals.couponError) throw new StoreError("coupon", totals.couponError);
   const list = read(KEYS.orders, []);
   const now = new Date().toISOString();
   const status = payment.status === "aprovado" ? "pago" : "aguardando";
-  const order = {
+  let order = {
     id: nextOrderId(list),
     createdAt: now,
     customer,
@@ -356,6 +400,27 @@ export function createOrder({ customer, shipping, payment, couponCode }) {
     status,
     history: [{ at: now, status, note: status === "pago" ? "Pagamento aprovado (simulado)." : "Pedido criado." }],
   };
+
+  if (typeof fetch === "function") {
+    try {
+      const res = await fetch("/api/v1/store/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ order }),
+      });
+      if (res.status !== 404 && res.status !== 405 && res.status !== 501) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new StoreError(data.code || "order_error", data.message || "Não foi possível concluir o pedido.");
+        }
+        if (data.order) order = data.order;
+      }
+    } catch (err) {
+      if (err instanceof StoreError) throw err;
+    }
+  }
+
   list.push(order);
   try {
     write(KEYS.orders, list);
@@ -365,7 +430,6 @@ export function createOrder({ customer, shipping, payment, couponCode }) {
   }
   order.items.forEach((i) => adjustStock(i.productId, -i.qty));
   clearCart();
-  bgSync("/api/v1/store/orders", "POST", { order });
   return order;
 }
 
