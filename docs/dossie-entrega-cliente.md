@@ -216,6 +216,8 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
    * **Demais cidades do Brasil:** Cotação automática para envio pela **Transportadora Loggi** (`server/shipping-loggi.mjs`), com botão **"Gerar envio na Loggi"** direto no painel da Thaís para emitir o código e link de rastreio.
 6. **Autopreenchimento Instantâneo de Endereço por CEP (BrasilAPI + ViaCEP + OpenCEP):**
    * Ao digitar o CEP no **Cadastro de Conta**, na área **Minha Conta** ou no **Checkout**, o sistema consulta automaticamente 3 bases oficiais gratuitas em cascata com cache de 24h, preenchendo Rua, Bairro, Cidade e Estado sem erro de digitação e já calculando o frete correto na mesma hora.
+7. **Controle de Upload de Fotos por Produto e por Linha no Painel (`/painel-tp/`):**
+   * Na aba **Produtos & Estoque**, a coluna **Upload de Fotos** permite habilitar ou desabilitar com um clique quais peças aceitam envio de imagens pelo cliente (e escolher se o envio é **opcional** ou **obrigatório**), além de contar com filtro por linha (ex.: *Cadernos personalizados*) e botões em lote (**Ativar/Desativar upload de fotos nesta linha**) que preservam todas as opções de personalização do produto (nome, tamanho, miolo, tema).
 
 ---
 
@@ -255,7 +257,8 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
   * Teste 4b: "Minha conta" exige login e lista só os pedidos da própria cliente, com a etapa atualizada pelo ateliê (`PASS`).
   * Teste 7: Direito ao esquecimento LGPD com exclusão e anonimização no PostgreSQL (`PASS`).
   * Teste 8: Foto original enviada pela cliente baixada byte a byte idêntica (individual e dentro do `.ZIP`, com conferência de CRC-32), foto vencida fora do pacote e expurgo após 7 dias com `HTTP 410` (`PASS`).
-  * **Resultado da última execução (06/11/2026): 14 de 14 testes aprovados, 0 falhas.**
+  * Testes 9, 10 e 11 + `tests/site-content.test.mjs`: Blindagem financeira (V7), Webhook Asaas idempotente, bloqueio de cupons de 1ª compra/reutilizados, frete híbrido Motoboy (Cambé R$ 10 / Londrina R$ 20) + Loggi, API gratuita de CEP, vitrine/banners e alternância de upload de fotos por produto preservando opções no PostgreSQL (`PASS`).
+  * **Resultado da última execução (16/11/2026): 29 de 29 testes aprovados, 0 falhas.**
 
 ---
 
@@ -268,8 +271,11 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 2. **Quando um cliente fizer um pedido:**
    * O pedido ficará salvo automaticamente no banco de dados em nuvem (aba **Pedidos** do painel) **e** chegará formatado no seu WhatsApp `(43) 98422-1611`.
    * Conforme você avançar na produção, basta mudar o status do pedido no painel (*Pagamento Confirmado* → *Em Produção* → *Pronto/Postado* → *Entregue*) para que o cliente acompanhe pelo link dele (com o código do pedido e os 4 últimos dígitos do telefone).
-4. **Para pegar as fotos de um pedido personalizado:**
+3. **Para pegar as fotos de um pedido personalizado:**
    * Na aba **Pedidos**, clique em **Baixar .ZIP**. O download começa na hora e traz todas as fotos originais numeradas + o arquivo `LEIAME` com as instruções de cada item.
    * Depois de produzir a arte, clique em **Apagar imagens agora (Arte pronta)**. Se esquecer, o sistema apaga sozinho após 7 dias.
-3. **Para cadastrar ou alterar estoque de Pronta Entrega:**
+4. **Para cadastrar ou alterar estoque de Pronta Entrega:**
    * Na aba **Produtos & Estoque**, use os botões `+1` e `-1` ou clique em **Editar** para ajustar preços, fotos e descrições. Todas as alterações são salvas diretamente no banco em nuvem do Supabase.
+5. **Para habilitar ou desabilitar o upload de fotos em um produto ou linha (ex.: Cadernos):**
+   * Na aba **Produtos & Estoque**, selecione a linha desejada no filtro **Linha** (ex.: *Cadernos personalizados*) e clique em **Ativar upload de fotos nesta linha** ou **Desativar upload de fotos nesta linha**.
+   * Para controlar produto por produto, marque ou desmarque **Aceita fotos** diretamente na coluna **Upload de Fotos** da tabela (e selecione se a foto é **Opcional** ou **Obrigatória**), ou ajuste dentro de **Editar**. Na loja pública, apenas os produtos marcados exibirão o campo de envio de fotos.

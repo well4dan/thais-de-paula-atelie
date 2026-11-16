@@ -7,7 +7,7 @@ import { modeTag, availability, productCard, selectionsSummary, isOnSale, produc
 import { open as openCart } from "./cart.js";
 
 const slug = params().get("p") || "caderno-floral-personalizado";
-const product = store.productBySlug(slug) || store.products()[0];
+let product = store.productBySlug(slug) || store.products()[0];
 
 const selections = {};
 let photoData = null;
@@ -326,3 +326,27 @@ function renderProduct() {
 }
 
 renderProduct();
+
+window.addEventListener("storage", () => {
+  const fresh = store.productBySlug(slug) || store.products()[0];
+  if (!fresh) return;
+  const prevOpts = JSON.stringify(product?.options || []);
+  const nextOpts = JSON.stringify(fresh.options || []);
+  const changedMeta =
+    product?.price !== fresh.price ||
+    product?.compareAtPrice !== fresh.compareAtPrice ||
+    product?.name !== fresh.name ||
+    product?.stock !== fresh.stock;
+  product = fresh;
+  if (prevOpts !== nextOpts) {
+    if (!(fresh.options || []).some((o) => o.type === "photo")) {
+      photoData = null;
+      uploadedAttachments = [];
+    }
+    renderProduct();
+  } else if (changedMeta) {
+    renderProduct();
+  } else {
+    updatePriceAndPreview();
+  }
+});

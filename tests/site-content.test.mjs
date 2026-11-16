@@ -15,6 +15,7 @@ const { createAppServer } = await import("../server.mjs");
 const { pool, ensureDatabaseReady } = await import("../server/pg-pool.mjs");
 const { cleanLink, validateBanner, invalidateSiteContentCache } = await import("../server/site-content.mjs");
 const { readWebpDimensions } = await import("../server/media.mjs");
+const { mergeProductOptions } = await import("../js/admin/products.js");
 
 const MARK = `TESTE-${Date.now()}`;
 const HOUR = 60 * 60 * 1000;
@@ -33,6 +34,7 @@ test("Conteúdo do site controlado pelo painel", async (t) => {
   const createdStrips = [];
   let originalShowcase = [];
   let originalProduct = null;
+  let originalP01Options = null;
 
   const login = await fetch(`${base}/api/v1/admin/login`, {
     method: "POST",
@@ -56,6 +58,10 @@ test("Conteúdo do site controlado pelo painel", async (t) => {
     if (originalProduct) {
       await pool.query("UPDATE public.products SET compare_at_price = $1, badges = $2 WHERE id = $3",
         [originalProduct.compare_at_price, originalProduct.badges, originalProduct.id]).catch(() => {});
+    }
+    if (originalP01Options !== null) {
+      await pool.query("UPDATE public.products SET options_json = $1::jsonb WHERE id = 'p01'",
+        [JSON.stringify(originalP01Options)]).catch(() => {});
     }
     await admin("POST", "/api/v1/admin/logout").catch(() => {});
     server.close();
@@ -217,5 +223,65 @@ test("Conteúdo do site controlado pelo painel", async (t) => {
     const banner = await admin("POST", "/api/v1/admin/banners", { placement: "meio", imageUrl: asset.url, altText: "Lápis pastel", active: false });
     createdBanners.push((await banner.json()).item.id);
     assert.equal((await admin("DELETE", `/api/v1/admin/media/${asset.sha256}`)).status, 409);
+  });
+
+  await t.test("Painel alterna upload de fotos em Cadernos (p01) preservando opções e persiste no catálogo", async () => {
+    const snapBefore = await fetch(`${base}/api/v1/store/snapshot`).then((r) => r.json());
+    const p01 = snapBefore.products.find((p) => p.id === "p01");
+    assert.ok(p01, "p01 existe no snapshot");
+    originalP01Options = JSON.parse(JSON.stringify(p01.options));
+    assert.ok(originalP01Options.length > 2, "p01 possui mais de 2 opções");
+
+    try {
+      const enabledOpts = mergeProductOptions(originalP01Options, {
+        hasNameOpt: true,
+        hasPhotoOpt: true,
+        photoRequired: false,
+      });
+      assert.equal(enabledOpts.length, originalP01Options.length + 1);
+      assert.equal(enabledOpts.find((o) => o.type === "photo")?.required, false);
+      assert.deepEqual(
+        enabledOpts.filter((o) => o.type !== "photo").map((o) => o.id),
+        originalP01Options.map((o) => o.id)
+      );
+
+      const resEnable = await admin("POST", "/api/v1/store/products", {
+        product: { ...p01, options: enabledOpts },
+      });
+      assert.equal(resEnable.status, 200);
+
+      const snapEnabled = await fetch(`${base}/api/v1/store/snapshot`).then((r) => r.json());
+      const p01Enabled = snapEnabled.products.find((p) => p.id === "p01");
+      assert.ok(p01Enabled.options.some((o) => o.type === "photo"));
+      assert.ok(["nome", "tamanho", "miolo", "tema", "obs"].every((id) => p01Enabled.options.some((o) => o.id === id)));
+
+      const disabledOpts = mergeProductOptions(p01Enabled.options, {
+        hasNameOpt: true,
+        hasPhotoOpt: false,
+      });
+      const resDisable = await admin("POST", "/api/v1/store/products", {
+        product: { ...p01Enabled, options: disabledOpts },
+      });
+      assert.equal(resDisable.status, 200);
+
+      const snapDisabled = await fetch(`${base}/api/v1/store/snapshot`).then((r) => r.json());
+      const p01Disabled = snapDisabled.products.find((p) => p.id === "p01");
+      assert.equal(p01Disabled.options.some((o) => o.type === "photo"), false);
+      assert.deepEqual(
+        p01Disabled.options.map((o) => o.id),
+        originalP01Options.map((o) => o.id)
+      );
+
+      // Também permite habilitar upload em produto originalmente sem opções (pronta entrega)
+      const prontaOpts = mergeProductOptions([], { hasNameOpt: false, hasPhotoOpt: true, photoRequired: true });
+      assert.deepEqual(
+        prontaOpts.map((o) => ({ type: o.type, required: o.required })),
+        [{ type: "photo", required: true }]
+      );
+    } finally {
+      if (originalP01Options !== null) {
+        await admin("POST", "/api/v1/store/products", { product: { ...p01, options: originalP01Options } }).catch(() => {});
+      }
+    }
   });
 });

@@ -305,6 +305,21 @@
 
 ---
 
+### [LOG-019] Controle de Upload de Fotos por Produto e por Linha no Painel Administrador (`/painel-tp/`)
+* **Causa-raiz corrigida ([js/admin/products.js](js/admin/products.js)):**
+  * No modal de edição de produto, a condição antiga `existing && existing.options.length > 2 ? existing.options : options` ignorava completamente o checkbox `"Pedir foto do cliente"` na maioria dos produtos do catálogo (como Cadernos `p01`, Agendas, Planners, Calendários, Blocos, Quadros e Etiquetas), pois todos possuem mais de 2 opções (`nome`, `tamanho`, `miolo`, `tema`, `obs`), além de restringir o toggle apenas ao modo `"demanda"`.
+* **Novas funções de gerenciamento ([js/admin/products.js](js/admin/products.js)):**
+  * Extraída a função `mergeProductOptions(existingOptions, { hasNameOpt, hasPhotoOpt, photoRequired })`: adiciona/atualiza/remove apenas o campo `type: "photo"` (e campo de nome se alterado no modal), preservando intactas todas as demais opções personalizadas (`select`, `text` extras e `textarea`), funcionando em qualquer produto (Sob demanda ou Pronta entrega).
+  * Adicionado filtro por linha (`#admin-prod-line-filter`) e botões de ação rápida em lote na barra superior da aba **Produtos & Estoque**: `"Ativar upload de fotos nesta linha"` (`#admin-line-enable-photo`) e `"Desativar upload de fotos nesta linha"` (`#admin-line-disable-photo`).
+  * Adicionada coluna dedicada **"Upload de Fotos"** na tabela do catálogo com checkbox instantâneo (`Aceita fotos` / `Sem foto`) e seletor de obrigatoriedade (`Foto opcional` / `Foto obrigatória`) por produto, gravando direto no PostgreSQL via `await store.flushSync()`.
+  * Modal de edição atualizado com `#pf-opt-photo` (*"Permitir upload de fotos pelo cliente neste produto"*) e `#pf-opt-photo-req` (*"Exigir foto obrigatória para adicionar ao carrinho"*).
+* **Sincronização na página do produto ([js/product.js](js/product.js)):**
+  * Adicionado listener para `window.addEventListener("storage", ...)` para re-renderizar o formulário de personalização assim que `pullFromPostgres()` carregar alterações do catálogo, exibindo ou ocultando a área de upload de foto imediatamente.
+* **Testes ([tests/site-content.test.mjs](tests/site-content.test.mjs)):**
+  * Adicionado teste automatizado validando ativação e desativação da opção `photo` em Cadernos (`p01`, 5 opções prévias) via `POST /api/v1/store/products`, conferindo persistência em `GET /api/v1/store/snapshot` com preservação integral das opções `nome`, `tamanho`, `miolo`, `tema` e `obs`. Suíte completa passou: **29 de 29 testes aprovados, 0 falhas**.
+
+---
+
 ## ✅ Checklist de Pendências (ordem de prioridade)
 - [x] 🔴 Recalcular preço, desconto e frete no servidor em `POST /api/v1/store/orders` (veto V7 FECHADO no LOG-014).
 - [x] 🔴 Receptor de Webhooks com verificação criptográfica (`asaas-access-token` / HMAC-SHA256) e idempotência no PostgreSQL (LOG-014).
