@@ -39,7 +39,7 @@ function setSecurityHeaders(res, pathname) {
   res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self' https://brasilapi.com.br https://viacep.com.br https://opencep.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"
   );
   if (pathname.startsWith("/painel-tp") || pathname.startsWith("/minha-conta") || pathname.startsWith("/conta")) {
     res.setHeader("X-Robots-Tag", "noindex, nofollow");

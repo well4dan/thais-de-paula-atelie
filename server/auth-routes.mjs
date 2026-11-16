@@ -23,6 +23,7 @@ import {
 import { ensureDatabaseReady, pool } from "./pg-pool.mjs";
 import { verifyWebhookAuth, normalizeWebhookPayload } from "./payments.mjs";
 import { calculateShippingQuote } from "./shipping-loggi.mjs";
+import { lookupCepInProviders } from "./cep.mjs";
 import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
@@ -135,6 +136,22 @@ export async function handleApiRequest(req, res, url) {
         settings: setRows[0]?.settings_json || {},
       });
       return sendJson(res, 200, { ok: true, quote, requestId });
+    }
+
+    // Busca gratuita de CEP com redundância tripla (BrasilAPI + ViaCEP + OpenCEP) e cache
+    const cepMatch = url.pathname.match(/^\/api\/v1\/cep\/([0-9-]{8,9})$/);
+    if (req.method === "GET" && cepMatch) {
+      const rl = checkRateLimit(`cep:${ip}`, 60, 15 * 60 * 1000);
+      if (!rl.allowed) {
+        return sendJson(
+          res,
+          429,
+          { code: "RATE_LIMITED", message: "Muitas consultas de CEP seguidas. Aguarde alguns instantes.", requestId },
+          { "Retry-After": String(rl.retryAfterSec) }
+        );
+      }
+      const address = await lookupCepInProviders(cepMatch[1]);
+      return sendJson(res, 200, { ok: true, address, requestId });
     }
 
     // Receptor oficial de Webhooks de Pagamento (Asaas / HMAC-SHA256) com verificação criptográfica e idempotência

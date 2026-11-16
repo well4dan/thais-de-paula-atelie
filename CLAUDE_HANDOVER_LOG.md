@@ -63,6 +63,7 @@
 │   ├── pg-pool.mjs                     # Pool PostgreSQL (pg) com normalização de URI e Keep-Alive
 │   ├── payments.mjs                    # Adaptador Asaas + Sandbox Simulado + verificação criptográfica de Webhook
 │   ├── shipping-loggi.mjs              # Frete híbrido: Motoboy Cambé (R$ 10) / Londrina (R$ 20) + API Transportadora Loggi
+│   ├── cep.mjs                         # Busca gratuita de CEP (BrasilAPI v2 -> ViaCEP -> OpenCEP) com cache de 24h
 │   ├── db.mjs                          # Camada DAL para usuários, sessões, pedidos, produtos e consentimentos
 │   ├── zip.mjs                         # Gerador PKZIP em streaming (STORE + data descriptor + zlib.crc32 nativo)
 │   ├── http-utils.mjs                  # Cookies, JSON, IP, rate limit e comparação em tempo constante (compartilhado)
@@ -288,6 +289,19 @@
   * Rota admin `POST /api/v1/store/orders/:orderId/loggi-shipment` em [server/admin-routes.mjs](server/admin-routes.mjs) + botão **"Gerar envio na Loggi"** em [js/admin/app.js](js/admin/app.js), bloqueando geração caso o pedido seja retirada ou Motoboy de Cambé/Londrina.
   * Exibição do código e link de rastreio Loggi em [js/order.js](js/order.js) (`pedido.html`).
 * **Testes:** Adicionado Teste 11 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) e atualizado Teste 9 (Londrina = R$ 20,00).
+
+### [LOG-018] API Multi-Provedor de Busca Automática de CEP (BrasilAPI v2 + ViaCEP + OpenCEP)
+* **Ação:** Criada API gratuita de busca automática de CEP no backend e cliente compartilhado para autopreencher endereço em todo o site (**Checkout**, **Cadastro** e **Minha Conta**).
+* **Backend ([server/cep.mjs](server/cep.mjs) e [server/auth-routes.mjs](server/auth-routes.mjs)):**
+  * Rota pública `GET /api/v1/cep/:cep` (rate limit 60/15 min) com cache de 24h em memória.
+  * Cascata de alta disponibilidade: tenta **BrasilAPI v2**, depois **ViaCEP**, depois **OpenCEP** (e fallback regional Cambé/Londrina caso offline).
+* **Frontend ([js/cep-client.js](js/cep-client.js)):**
+  * `bindCepLookup()` preenche automaticamente Rua/Avenida, Bairro, Cidade e UF ao digitar 8 dígitos (focando em seguida no campo Número) em:
+    1. [js/checkout.js](js/checkout.js) (`checkout.html`) — recalculando imediatamente o frete (Motoboy Cambé/Londrina ou Loggi).
+    2. [js/account.js](js/account.js) (`conta.html`) — preenchendo endereço no cadastro.
+    3. [js/my-account.js](js/my-account.js) (`minha-conta.html`) — preenchendo atualização de endereço.
+  * CSP em [server.mjs](server.mjs) liberada em `connect-src` para `brasilapi.com.br`, `viacep.com.br` e `opencep.com` caso o site rode em demo estática.
+* **Testes:** Validado no Teste 11 (`GET /api/v1/cep/86181-000` -> Cambé/PR e `GET /api/v1/cep/86010-150` -> Londrina/PR).
 
 ---
 

@@ -3,6 +3,7 @@
 import { $, $$, toast, params } from "./dom.js";
 import { maskCpf, maskPhone, maskCep, isValidCpf, isEmail, passwordStrength, onlyDigits } from "./format.js";
 import { fetchCurrentUser, loginAccount, registerAccount } from "./auth-client.js";
+import { bindCepLookup } from "./cep-client.js";
 
 const nextUrl = () => {
   const n = params().get("next") || "/minha-conta.html";
@@ -69,9 +70,19 @@ async function init() {
     e.target.value = maskPhone(e.target.value);
     setFieldError("reg", "phone", "");
   });
-  $("#reg-cep")?.addEventListener("input", (e) => {
-    e.target.value = maskCep(e.target.value);
-    setFieldError("reg", "cep", "");
+  bindCepLookup({
+    cepSelector: "#reg-cep",
+    streetSelector: "#reg-street",
+    districtSelector: "#reg-district",
+    citySelector: "#reg-city",
+    ufSelector: "#reg-uf",
+    numberSelector: "#reg-number",
+    onAddressFilled: () => {
+      setFieldError("reg", "cep", "");
+      setFieldError("reg", "street", "");
+      setFieldError("reg", "district", "");
+      setFieldError("reg", "city", "");
+    },
   });
   $("#reg-password")?.addEventListener("input", (e) => {
     updatePasswordChecklist(e.target.value);

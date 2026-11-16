@@ -214,6 +214,8 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
    * **Cambé / PR:** Entrega via Motoboy com valor fixo de **R$ 10,00** identificado automaticamente pelo CEP ou cidade.
    * **Londrina / PR:** Entrega via Motoboy com valor fixo de **R$ 20,00** identificado automaticamente pelo CEP ou cidade.
    * **Demais cidades do Brasil:** Cotação automática para envio pela **Transportadora Loggi** (`server/shipping-loggi.mjs`), com botão **"Gerar envio na Loggi"** direto no painel da Thaís para emitir o código e link de rastreio.
+6. **Autopreenchimento Instantâneo de Endereço por CEP (BrasilAPI + ViaCEP + OpenCEP):**
+   * Ao digitar o CEP no **Cadastro de Conta**, na área **Minha Conta** ou no **Checkout**, o sistema consulta automaticamente 3 bases oficiais gratuitas em cascata com cache de 24h, preenchendo Rua, Bairro, Cidade e Estado sem erro de digitação e já calculando o frete correto na mesma hora.
 
 ---
 

@@ -6,6 +6,7 @@ import * as store from "./store.js";
 import { selectionsSummary } from "./ui.js";
 import { fakePixCode, fakeBoletoLine, renderFakeQrSvg, renderBarcode } from "./payment-sim.js";
 import { fetchCurrentUser } from "./auth-client.js";
+import { bindCepLookup } from "./cep-client.js";
 
 const state = {
   shippingMethod: "retirada",
@@ -212,24 +213,14 @@ async function refreshShippingQuote() {
 
 $("#c-phone")?.addEventListener("input", (e) => { e.target.value = maskPhone(e.target.value); });
 $("#c-cpf")?.addEventListener("input", (e) => { e.target.value = maskCpf(e.target.value); });
-$("#c-cep")?.addEventListener("input", async (e) => {
-  e.target.value = maskCep(e.target.value);
-  const digits = onlyDigits(e.target.value);
-  if (digits.length === 8) {
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
-      const data = await res.json();
-      if (data && !data.erro) {
-        if ($("#c-city") && data.localidade) $("#c-city").value = data.localidade;
-        if ($("#c-uf") && data.uf) $("#c-uf").value = data.uf;
-        if ($("#c-street") && !$("#c-street").value && data.logradouro) $("#c-street").value = data.logradouro;
-        if ($("#c-district") && !$("#c-district").value && data.bairro) $("#c-district").value = data.bairro;
-      }
-    } catch {
-      // Continua com digitação manual
-    }
-    refreshShippingQuote();
-  }
+bindCepLookup({
+  cepSelector: "#c-cep",
+  streetSelector: "#c-street",
+  districtSelector: "#c-district",
+  citySelector: "#c-city",
+  ufSelector: "#c-uf",
+  numberSelector: "#c-number",
+  onAddressFilled: () => refreshShippingQuote(),
 });
 $("#c-city")?.addEventListener("input", () => {
   state.serverShippingQuote = null;

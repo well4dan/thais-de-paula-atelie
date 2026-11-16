@@ -810,6 +810,19 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     const trkBody = await trk.json();
     assert.equal(trkBody.order.shipping.trackingCode, shipSpBody.shipment.trackingCode);
 
+    // Busca automática de CEP (BrasilAPI / ViaCEP / OpenCEP + fallback)
+    const cepCambe = await fetch(`${baseUrl}/api/v1/cep/86181-000`);
+    assert.equal(cepCambe.status, 200);
+    const cepCambeBody = await cepCambe.json();
+    assert.equal(cepCambeBody.address.city, "Cambé");
+    assert.equal(cepCambeBody.address.uf, "PR");
+
+    const cepLondrina = await fetch(`${baseUrl}/api/v1/cep/86010-150`);
+    assert.equal(cepLondrina.status, 200);
+    const cepLondrinaBody = await cepLondrina.json();
+    assert.equal(cepLondrinaBody.address.city, "Londrina");
+    assert.equal(cepLondrinaBody.address.uf, "PR");
+
     // Limpeza dos pedidos de teste
     await pool.query("DELETE FROM public.orders WHERE id IN ($1, $2)", [ordCambeId, ordSpId]);
   });

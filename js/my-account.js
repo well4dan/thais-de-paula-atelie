@@ -12,6 +12,7 @@ import {
   fetchMyOrders,
 } from "./auth-client.js";
 import * as store from "./store.js";
+import { bindCepLookup } from "./cep-client.js";
 
 function populateForm(user) {
   $("#me-name").value = user.name || "";
@@ -86,7 +87,14 @@ async function init() {
     });
 
   $("#me-phone")?.addEventListener("input", (e) => { e.target.value = maskPhone(e.target.value); });
-  $("#me-cep")?.addEventListener("input", (e) => { e.target.value = maskCep(e.target.value); });
+  bindCepLookup({
+    cepSelector: "#me-cep",
+    streetSelector: "#me-street",
+    districtSelector: "#me-district",
+    citySelector: "#me-city",
+    ufSelector: "#me-uf",
+    numberSelector: "#me-number",
+  });
 
   $("#profile-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
