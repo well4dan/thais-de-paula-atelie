@@ -1,7 +1,7 @@
 // Checkout completo com entrega e pagamento simulado (Pix, Cartão de teste, Boleto).
 
 import { $, $$, h, icon, clear, toast } from "./dom.js";
-import { money, maskPhone, maskCep, maskCard, maskExpiry, luhnValid, cardBrand, isEmail, onlyDigits } from "./format.js";
+import { money, maskPhone, maskCep, maskCpf, isValidCpf, maskCard, maskExpiry, luhnValid, cardBrand, isEmail, onlyDigits } from "./format.js";
 import * as store from "./store.js";
 import { selectionsSummary } from "./ui.js";
 import { fakePixCode, fakeBoletoLine, renderFakeQrSvg, renderBarcode } from "./payment-sim.js";
@@ -12,6 +12,7 @@ const state = {
   payMethod: "pix",
   couponCode: "",
   serverCouponError: "",
+  loggedUserHasCpf: false,
 };
 
 function currentCustomerHint() {
@@ -142,9 +143,17 @@ function setErr(id, msg) {
 function validateForm() {
   let ok = true;
   const name = $("#c-name").value.trim();
+  const cpfDigits = onlyDigits($("#c-cpf")?.value || "");
   const email = $("#c-email").value.trim();
   const phone = onlyDigits($("#c-phone").value);
   ok = setErr("c-name", name.length < 3 ? "Informe seu nome completo." : "") && ok;
+  if (cpfDigits.length > 0) {
+    ok = setErr("c-cpf", !isValidCpf(cpfDigits) ? "CPF inválido. Confira os 11 dígitos." : "") && ok;
+  } else if (!state.loggedUserHasCpf) {
+    ok = setErr("c-cpf", "Informe seu CPF para emissão da cobrança.") && ok;
+  } else {
+    ok = setErr("c-cpf", "") && ok;
+  }
   ok = setErr("c-email", !isEmail(email) ? "Informe um e-mail válido." : "") && ok;
   ok = setErr("c-phone", phone.length < 10 ? "Informe um WhatsApp com DDD." : "") && ok;
 
@@ -165,6 +174,7 @@ function validateForm() {
 }
 
 $("#c-phone")?.addEventListener("input", (e) => { e.target.value = maskPhone(e.target.value); });
+$("#c-cpf")?.addEventListener("input", (e) => { e.target.value = maskCpf(e.target.value); });
 $("#c-cep")?.addEventListener("input", (e) => { e.target.value = maskCep(e.target.value); });
 
 $$("[data-ship-method]").forEach((btn) => {
@@ -227,10 +237,12 @@ $("#checkout-form")?.addEventListener("submit", async (e) => {
     return;
   }
 
+  const cpfInputDigits = onlyDigits($("#c-cpf")?.value || "");
   const customer = {
     name: $("#c-name").value.trim(),
     email: $("#c-email").value.trim(),
     phone: $("#c-phone").value.trim(),
+    ...(cpfInputDigits ? { cpf: cpfInputDigits } : {}),
   };
 
   const shipping = state.shippingMethod === "envio"
@@ -277,6 +289,11 @@ fetchCurrentUser().then((user) => {
   if ($("#c-name") && !$("#c-name").value) $("#c-name").value = user.name || "";
   if ($("#c-email") && !$("#c-email").value) $("#c-email").value = user.email || "";
   if ($("#c-phone") && !$("#c-phone").value) $("#c-phone").value = maskPhone(user.phone || "");
+  if (user.cpfMasked && $("#c-cpf")) {
+    state.loggedUserHasCpf = true;
+    $("#c-cpf").removeAttribute("required");
+    $("#c-cpf").placeholder = `${user.cpfMasked} (salvo na conta)`;
+  }
   if (user.address) {
     if ($("#c-cep") && !$("#c-cep").value) $("#c-cep").value = user.address.cep || "";
     if ($("#c-city") && !$("#c-city").value) $("#c-city").value = user.address.city || "";

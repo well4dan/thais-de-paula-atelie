@@ -3,6 +3,7 @@
 import { $, h, icon, clear, toast, params } from "./dom.js";
 import { money, dateTime, waLink } from "./format.js";
 import * as store from "./store.js";
+import { renderFakeQrSvg, renderBarcode } from "./payment-sim.js";
 
 const STEPS = [
   { key: "aguardando", label: "Pedido recebido" },
@@ -109,6 +110,7 @@ function renderOrder(order) {
 
   const cfg = store.settings();
   const waMsg = `Olá, Thaís! Fiz o pedido ${order.id} no site (${money(order.totals.total)}) em nome de ${order.customer.name}.`;
+  const payBox = buildPaymentActionBox(order);
 
   root.append(
     h("div", { class: "bezel" },
@@ -140,8 +142,81 @@ function renderOrder(order) {
             order.totals.discount > 0 ? h("div", { class: "drawer__row" }, h("span", { text: "Desconto" }), h("span", { text: `- ${money(order.totals.discount)}` })) : null,
             h("div", { class: "drawer__row" }, h("span", { text: "Entrega" }), h("span", { text: order.totals.shipping === 0 ? "Grátis" : money(order.totals.shipping) })),
             h("div", { class: "drawer__row drawer__row--total" }, h("span", { text: "Total" }), h("span", { text: money(order.totals.total) })),
-            h("p", { class: "field__hint", style: "margin-top:0.5rem", text: `Forma de pagamento: ${order.payment.method.toUpperCase()} (${order.payment.status})` }),
-            h("p", { class: "field__hint", text: order.shipping.method === "envio" ? `Entrega: ${order.shipping.street}, ${order.shipping.number} (${order.shipping.city}/${order.shipping.uf})` : "Entrega: Retirada combinada pelo WhatsApp" }))))));
+            h("p", { class: "field__hint", style: "margin-top:0.5rem", text: `Forma de pagamento: ${(order.payment?.method || "pix").toUpperCase()} (${order.payment?.status || "pendente"})` }),
+            h("p", { class: "field__hint", text: order.shipping.method === "envio" ? `Entrega: ${order.shipping.street}, ${order.shipping.number} (${order.shipping.city}/${order.shipping.uf})` : "Entrega: Retirada combinada pelo WhatsApp" }),
+            payBox))))));
+}
+
+function buildPaymentActionBox(order) {
+  const pay = order.payment || {};
+  const isWaiting = order.status === "aguardando" || pay.status === "pendente";
+
+  if (!isWaiting) {
+    if (pay.checkoutUrl) {
+      return h("div", { style: "margin-top:0.75rem" },
+        h("a", {
+          class: "btn btn--sm btn--ghost",
+          href: pay.checkoutUrl,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }, "Ver comprovante / fatura no Asaas"));
+    }
+    return null;
+  }
+
+  const children = [h("strong", { text: "Pagamento aguardando confirmação" })];
+
+  if (pay.method === "pix" && pay.pixQrPayload) {
+    const qrEl = pay.pixQrImage
+      ? h("img", { src: pay.pixQrImage, alt: "QR Code PIX do pedido", width: 156, height: 156, style: "border-radius:10px;background:#fff;padding:0.35rem" })
+      : renderFakeQrSvg();
+    children.push(
+      h("div", { style: "display:flex;flex-wrap:wrap;gap:1rem;align-items:center;margin-top:0.5rem" },
+        qrEl,
+        h("div", { style: "flex:1;min-width:200px;display:grid;gap:0.5rem" },
+          h("code", { style: "font-size:0.75rem;word-break:break-all;background:var(--paper);padding:0.5rem;border-radius:8px;border:1px solid var(--line)", text: pay.pixQrPayload }),
+          h("button", {
+            class: "btn btn--sm btn--plain",
+            type: "button",
+            onclick: () => {
+              navigator.clipboard?.writeText(pay.pixQrPayload);
+              toast("Código PIX Copia e Cola copiado!");
+            },
+          }, icon("copy"), "Copiar código PIX (Copia e Cola)")))
+    );
+  }
+
+  if (pay.method === "boleto" && pay.boletoLine) {
+    children.push(
+      h("div", { style: "display:grid;gap:0.5rem;margin-top:0.5rem" },
+        renderBarcode(),
+        h("code", { style: "font-size:0.78rem;word-break:break-all;background:var(--paper);padding:0.5rem;border-radius:8px;border:1px solid var(--line)", text: pay.boletoLine }),
+        h("button", {
+          class: "btn btn--sm btn--ghost",
+          type: "button",
+          onclick: () => {
+            navigator.clipboard?.writeText(pay.boletoLine);
+            toast("Linha digitável do boleto copiada!");
+          },
+        }, icon("copy"), "Copiar linha digitável"))
+    );
+  }
+
+  if (pay.checkoutUrl) {
+    children.push(
+      h("a", {
+        class: "btn btn--sm",
+        style: "margin-top:0.5rem;width:100%;justify-content:center",
+        href: pay.checkoutUrl,
+        target: "_blank",
+        rel: "noopener noreferrer",
+      }, "Pagar ou abrir fatura segura no Asaas")
+    );
+  }
+
+  return children.length > 1
+    ? h("div", { style: "margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--line);display:grid;gap:0.35rem" }, ...children)
+    : null;
 }
 
 // Status vem sempre do servidor quando ele existe: o ateliê muda as etapas no painel, não neste navegador

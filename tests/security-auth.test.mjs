@@ -472,6 +472,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     process.env.PAYMENT_WEBHOOK_SECRET = webhookSecret;
 
     const fakeOrderId = `TP-2026-9${String(Date.now()).slice(-4)}`;
+    const checkoutCpf = makeValidCpf("390533447");
     // Cliente mal-intencionado tenta enviar p01 (R$ 69,90) por 1 centavo (unit: 1, total: 1) e frete envio = 0
     const resOrder = await fetch(`${baseUrl}/api/v1/store/orders`, {
       method: "POST",
@@ -479,7 +480,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
       body: JSON.stringify({
         order: {
           id: fakeOrderId,
-          customer: { name: "Teste Fraude Preco", email: "fraude@exemplo.com.br", phone: "(43) 99999-1111" },
+          customer: { name: "Teste Fraude Preco", cpf: checkoutCpf, email: "fraude@exemplo.com.br", phone: "(43) 99999-1111" },
           shipping: { method: "envio", cep: "86010-150", street: "Rua A", number: "10", city: "Londrina", uf: "PR" },
           payment: { method: "boleto", status: "aprovado" },
           coupon: null,
@@ -491,11 +492,15 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(resOrder.status, 201);
     const orderBody = await resOrder.json();
 
-    // O servidor recalculou tudo no PostgreSQL: p01 (6990) + frete padrão (1890) = 8880 centavos, e status = aguardando
+    // O servidor recalculou tudo no PostgreSQL: p01 (6990) + frete padrão (1890) = 8880 centavos, status = aguardando,
+    // gera boletoLine e mascara o CPF no pedido gravado (sem nunca expor ou salvar CPF aberto em orders.customer_json)
     assert.equal(orderBody.order.totals.subtotal, 6990);
     assert.equal(orderBody.order.totals.shipping, 1890);
     assert.equal(orderBody.order.totals.total, 8880);
     assert.equal(orderBody.order.status, "aguardando");
+    assert.ok(orderBody.order.payment.boletoLine);
+    assert.equal(orderBody.order.customer.cpf, undefined);
+    assert.match(orderBody.order.customer.cpfMasked, /^\*\*\*\.\d{3}\.\d{3}-\d{2}$/);
 
     const asaasEvent = {
       id: `evt_asaas_${Date.now()}`,

@@ -76,10 +76,15 @@
             <div class="bezel__core checkout-step">
               <h2>Seus dados</h2>
               <div class="form-grid">
-                <div class="field full">
+                <div class="field">
                   <label for="c-name">Nome completo *</label>
                   <input class="input" id="c-name" type="text" required autocomplete="name" placeholder="Ex.: Ana Clara de Souza">
                   <span class="field__error" id="err-c-name"></span>
+                </div>
+                <div class="field">
+                  <label for="c-cpf">CPF (para nota/cobrança) *</label>
+                  <input class="input" id="c-cpf" type="text" inputmode="numeric" maxlength="14" required placeholder="000.000.000-00" autocomplete="off">
+                  <span class="field__error" id="err-c-cpf"></span>
                 </div>
                 <div class="field">
                   <label for="c-email">E-mail *</label>

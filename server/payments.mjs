@@ -153,9 +153,11 @@ export async function createGatewayCharge({ order, customerCpf = "" }) {
     });
 
     let pixQrPayload = null;
+    let pixQrImage = null;
     if (billingType === "PIX" && paymentRes.id) {
       const qr = await asaasRequest(`/payments/${encodeURIComponent(paymentRes.id)}/pixQrCode`).catch(() => null);
       if (qr?.payload) pixQrPayload = qr.payload;
+      if (qr?.encodedImage) pixQrImage = `data:image/png;base64,${qr.encodedImage}`;
     }
 
     return {
@@ -163,6 +165,7 @@ export async function createGatewayCharge({ order, customerCpf = "" }) {
       chargeId: paymentRes.id || null,
       checkoutUrl: paymentRes.invoiceUrl || null,
       pixQrPayload,
+      pixQrImage,
       boletoLine: paymentRes.identificationField || null,
       initialStatus: "aguardando",
       paymentStatus: "pendente",
@@ -171,12 +174,20 @@ export async function createGatewayCharge({ order, customerCpf = "" }) {
 
   // Modo Sandbox Simulado (enquanto não houver credencial ativa do gateway)
   const isBoleto = method === "boleto";
+  const pixQrPayload =
+    method === "pix"
+      ? `00020126580014BR.GOV.BCB.PIX0136thaisdepaulaatelie-${order.id}5204000053039865802BR`
+      : null;
+  const boletoLine = isBoleto
+    ? `34191.79001 01043.510047 91020.150008 8 99990000${String(order.totals.total).padStart(6, "0")}`
+    : null;
   return {
     provider: "sandbox_sim",
     chargeId: `sim_${order.id}`,
     checkoutUrl: null,
-    pixQrPayload: null,
-    boletoLine: null,
+    pixQrPayload,
+    pixQrImage: null,
+    boletoLine,
     initialStatus: isBoleto ? "aguardando" : "pago",
     paymentStatus: isBoleto ? "pendente" : "aprovado",
   };

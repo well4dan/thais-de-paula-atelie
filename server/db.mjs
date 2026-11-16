@@ -449,11 +449,12 @@ export async function getPublicStoreSnapshot() {
   };
 }
 
-// Rastreio público: exige os 4 últimos dígitos do telefone do pedido e devolve só status e itens, sem dados pessoais
+// Rastreio público: exige os 4 últimos dígitos do telefone do pedido e devolve só status, itens e instruções de pagamento, sem dados pessoais
 export async function getOrderTrackingInPg(orderId, phoneLast4) {
   await ensureDatabaseReady();
   const { rows } = await pool.query(
-    "SELECT id, customer_json, status, history_json, lead_days, created_at FROM public.orders WHERE id = $1",
+    `SELECT id, customer_json, payment_json, payment_provider, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, status, history_json, lead_days, created_at
+     FROM public.orders WHERE id = $1`,
     [orderId]
   );
   const order = rows[0];
@@ -472,6 +473,15 @@ export async function getOrderTrackingInPg(orderId, phoneLast4) {
     createdAt: order.created_at instanceof Date ? order.created_at.toISOString() : order.created_at,
     history: (order.history_json || []).map((h) => ({ at: h.at, status: h.status, note: h.note })),
     items: items.map((it) => ({ name: it.name, image: it.image, qty: it.qty })),
+    payment: {
+      method: order.payment_json?.method || "pix",
+      status: order.payment_json?.status || "pendente",
+      provider: order.payment_provider || order.payment_json?.provider || "sandbox_sim",
+      checkoutUrl: order.gateway_checkout_url || order.payment_json?.checkoutUrl || null,
+      pixQrPayload: order.pix_qr_payload || order.payment_json?.pixQrPayload || null,
+      pixQrImage: order.payment_json?.pixQrImage || null,
+      boletoLine: order.boleto_digitable_line || order.payment_json?.boletoLine || null,
+    },
   };
 }
 
@@ -950,8 +960,12 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       ? String(orderInput.payment.method).toLowerCase()
       : "pix";
 
-    // Se usuário estiver logado, busca CPF descriptografado para envio seguro ao gateway Asaas (nunca logado)
-    if (userId) {
+    // Obtém CPF do formulário do checkout ou da conta logada apenas em memória para enviar ao Asaas;
+    // nunca grava CPF em texto puro dentro de public.orders.customer_json (apenas mascarado conforme LGPD).
+    const rawCheckoutCpf = String(orderInput.customer?.cpf || "").replace(/\D+/g, "");
+    if (rawCheckoutCpf.length === 11) {
+      customerCpfPlain = rawCheckoutCpf;
+    } else if (userId) {
       const { rows: uRows } = await client.query(
         "SELECT cpf_encrypted FROM public.users WHERE id = $1 AND deleted_at IS NULL",
         [userId]
@@ -965,11 +979,18 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       }
     }
 
+    const safeCustomer = {
+      name: String(orderInput.customer?.name || "").trim(),
+      email: String(orderInput.customer?.email || "").trim(),
+      phone: String(orderInput.customer?.phone || "").trim(),
+      ...(customerCpfPlain.length === 11 ? { cpfMasked: maskCpf(customerCpfPlain) } : {}),
+    };
+
     const createdAt = new Date().toISOString();
     const initialOrderSkeleton = {
       id: orderId,
       createdAt,
-      customer: orderInput.customer || {},
+      customer: safeCustomer,
       shipping: { ...(orderInput.shipping || {}), method: shippingMethod },
       payment: { ...(orderInput.payment || {}), method: paymentMethod },
       totals: serverTotals,
@@ -987,6 +1008,7 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       ...(charge.chargeId ? { chargeId: charge.chargeId } : {}),
       ...(charge.checkoutUrl ? { checkoutUrl: charge.checkoutUrl } : {}),
       ...(charge.pixQrPayload ? { pixQrPayload: charge.pixQrPayload } : {}),
+      ...(charge.pixQrImage ? { pixQrImage: charge.pixQrImage } : {}),
       ...(charge.boletoLine ? { boletoLine: charge.boletoLine } : {}),
     };
 
@@ -1013,7 +1035,7 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       [
         orderId,
         userId,
-        JSON.stringify(orderInput.customer || {}),
+        JSON.stringify(safeCustomer),
         JSON.stringify(initialOrderSkeleton.shipping),
         JSON.stringify(finalPayment),
         appliedCoupon,

@@ -207,6 +207,9 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 3. **Bloqueio de Cupons de Primeira Compra e Cupons Já Utilizados (`007_coupon_usage_lock.sql`):**
    * Cupons marcados como **Exclusivo 1ª compra** (como `BEMVINDA10`) são bloqueados automaticamente se o cliente (por conta logada, e-mail ou WhatsApp) já possuir qualquer pedido real anterior.
    * Cupons marcados como **uso único por cliente** (como `ATELIE15`) são gravados na tabela `coupon_redemptions` e bloqueados em tentativas de reutilização pela mesma pessoa. Se um pedido for cancelado, o sistema libera o cupom automaticamente.
+4. **CPF Protegido por LGPD no Checkout e QR Code PIX / Fatura na Página do Pedido (`checkout.html` e `pedido.html`):**
+   * Adicionado campo de **CPF validado** no checkout (preenchido automaticamente quando a cliente já tem conta), permitindo emissão imediata de nota/cobrança no **Asaas** sem gravar o CPF aberto nos pedidos (apenas mascarado `***.456.789-00`).
+   * A página do pedido (`pedido.html`) já exibe o **QR Code PIX**, botão **Copiar PIX (Copia e Cola)**, linha digitável de boleto e botão direto para a **fatura segura no Asaas**.
 
 ---
 

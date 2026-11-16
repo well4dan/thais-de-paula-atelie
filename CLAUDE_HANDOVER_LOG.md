@@ -260,6 +260,18 @@
   * [js/admin/app.js](js/admin/app.js) ganhou checkbox `"Exclusivo 1ª compra"` e exibição das regras de uso por cliente.
 * **Testes:** Adicionado Teste 10 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) provando uso único na 1ª compra (`BEMVINDA10` OK → 2ª tentativa `409`), bloqueio de outro cupom de 1ª compra após já ter comprado e bloqueio de reuso de cupom comum (`ATELIE15`).
 
+### [LOG-016] Campo CPF no Checkout (LGPD) + Exibição de QR Code PIX, Boleto e Link da Fatura Asaas na Página do Pedido
+* **Ação:** Integrado campo de CPF no checkout (`checkout.html` / `js/checkout.js`) exigido pelo Asaas para cobranças reais e exibição dinâmica de pagamento na página do pedido (`js/order.js`).
+* **Checkout ([checkout.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/checkout.html) e [js/checkout.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/checkout.js)):**
+  * Campo `#c-cpf` com máscara `000.000.000-00` e validação matemática dos 2 dígitos verificadores (`isValidCpf`).
+  * Se a cliente estiver logada (`user.cpfMasked`), não precisa redigitar: o servidor usa automaticamente o CPF descriptografado da conta.
+* **Proteção LGPD no Servidor ([server/db.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/db.mjs)):**
+  * `createOrderInPg()` usa o CPF em memória apenas para enviar à API do Asaas e grava no pedido (`orders.customer_json`) exclusivamente `cpfMasked: "***.456.789-00"` (nunca o CPF completo em texto puro).
+* **Instruções de Pagamento em Tempo Real ([server/payments.mjs](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/server/payments.mjs) e [js/order.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/order.js)):**
+  * `createGatewayCharge()` captura `pixQrImage` (`encodedImage` em base64 do Asaas), `pixQrPayload` (Copia e Cola), `boletoLine` e `checkoutUrl`, com geração compatível no modo `sandbox_sim`.
+  * `buildPaymentActionBox(order)` em [js/order.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/order.js) renderiza QR Code PIX + botão copiar, código de barras + botão copiar do boleto e botão `"Pagar ou abrir fatura segura no Asaas"` enquanto o pagamento está pendente.
+  * `getOrderTrackingInPg()` devolve os metadados de pagamento não sensíveis para manter a tela sincronizada.
+
 ---
 
 ## ✅ Checklist de Pendências (ordem de prioridade)
