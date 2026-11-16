@@ -105,10 +105,13 @@
               <h2>Como prefere receber?</h2>
               <div class="segmented" role="group" aria-label="Forma de entrega">
                 <button type="button" aria-pressed="true" data-ship-method="retirada">Retirada combinada pelo WhatsApp (Grátis)</button>
-                <button type="button" aria-pressed="false" data-ship-method="envio">Envio pelos Correios</button>
+                <button type="button" aria-pressed="false" data-ship-method="envio">Entrega no endereço (Motoboy ou Loggi)</button>
               </div>
 
               <div id="address-fields" class="form-grid" style="margin-top:1.25rem" hidden>
+                <div class="field full">
+                  <p class="field__hint" id="shipping-quote-info">Cambé: Motoboy R$ 10,00 | Londrina: Motoboy R$ 20,00 | Demais cidades: Transportadora Loggi.</p>
+                </div>
                 <div class="field">
                   <label for="c-cep">CEP *</label>
                   <input class="input" id="c-cep" type="text" inputmode="numeric" placeholder="86000-000">

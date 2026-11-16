@@ -158,6 +158,7 @@ export function ensureDatabaseReady() {
         "005_site_content.sql",
         "006_payments_and_financial_lock.sql",
         "007_coupon_usage_lock.sql",
+        "008_shipping_loggi_and_motoboy.sql",
       ];
       const client = await pool.connect();
       try {

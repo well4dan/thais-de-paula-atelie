@@ -361,9 +361,29 @@ function openOrderDialog(o) {
         attBlocks)));
   }
 
+  const isOutCityShipping = o.shipping?.method === "envio" && o.shipping?.carrier !== "motoboy_cambe" && o.shipping?.carrier !== "motoboy_londrina";
+  const hasTrackingCode = Boolean(o.shipping?.trackingCode);
+
   const actionsBar = h("div", { style: "margin-top:1rem;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0.75rem" },
     h("strong", { text: `Total: ${money(o.totals.total)} (${o.payment.method.toUpperCase()})` }),
     h("div", { style: "display:flex;flex-wrap:wrap;gap:0.5rem" },
+      isOutCityShipping && !hasTrackingCode
+        ? h("button", {
+            class: "btn btn--sm btn--plain",
+            type: "button",
+            onclick: async () => {
+              try {
+                const ship = await store.generateLoggiShipment(o.id);
+                toast(`Envio Loggi gerado: ${ship.trackingCode}`);
+                const refreshed = store.orderById(o.id) || o;
+                openOrderDialog(refreshed);
+                renderActiveTab();
+              } catch (err) {
+                toast(err.message, "error");
+              }
+            },
+          }, "Gerar envio na Loggi")
+        : null,
       hasActiveImages
         ? h("a", {
             class: "btn btn--sm btn--plain",
@@ -386,9 +406,13 @@ function openOrderDialog(o) {
         : null,
       h("a", { class: "btn btn--sm btn--ghost", href: `/pedido.html?id=${encodeURIComponent(o.id)}`, target: "_blank", rel: "noopener noreferrer" }, "Abrir visão do cliente")));
 
+  const shipLabel = o.shipping?.method === "envio"
+    ? `${o.shipping.serviceLabel || "Entrega"}: ${o.shipping.street}, ${o.shipping.number} - ${o.shipping.city}/${o.shipping.uf} (CEP ${o.shipping.cep})${o.shipping.trackingCode ? ` | Rastreio Loggi: ${o.shipping.trackingCode}` : ""}`
+    : "Retirada combinada pelo WhatsApp";
+
   body.append(
     h("p", { text: `Cliente: ${o.customer.name} (${o.customer.email} | ${o.customer.phone})` }),
-    h("p", { class: "muted", style: "margin-top:0.25rem", text: o.shipping.method === "envio" ? `Envio: ${o.shipping.street}, ${o.shipping.number} - ${o.shipping.city}/${o.shipping.uf} (CEP ${o.shipping.cep})` : "Retirada combinada pelo WhatsApp" }),
+    h("p", { class: "muted", style: "margin-top:0.25rem", text: shipLabel }),
     h("p", { class: "field__hint", style: "margin-top:0.35rem", text: "Política de armazenamento: as imagens enviadas pelos clientes ficam disponíveis para download original e são apagadas automaticamente do banco após 7 dias." }),
     h("hr", { style: "border:0;border-top:1px solid var(--line);margin:1rem 0" }),
     items,

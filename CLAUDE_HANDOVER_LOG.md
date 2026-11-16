@@ -61,6 +61,8 @@
 │   ├── env.mjs                         # Parser e validador de variáveis de ambiente
 │   ├── security.mjs                    # Criptografia AES-256-GCM, Blind Index HMAC, scrypt e CSRF
 │   ├── pg-pool.mjs                     # Pool PostgreSQL (pg) com normalização de URI e Keep-Alive
+│   ├── payments.mjs                    # Adaptador Asaas + Sandbox Simulado + verificação criptográfica de Webhook
+│   ├── shipping-loggi.mjs              # Frete híbrido: Motoboy Cambé (R$ 10) / Londrina (R$ 20) + API Transportadora Loggi
 │   ├── db.mjs                          # Camada DAL para usuários, sessões, pedidos, produtos e consentimentos
 │   ├── zip.mjs                         # Gerador PKZIP em streaming (STORE + data descriptor + zlib.crc32 nativo)
 │   ├── http-utils.mjs                  # Cookies, JSON, IP, rate limit e comparação em tempo constante (compartilhado)
@@ -78,7 +80,8 @@
 │       ├── 004_admin_sessions.sql               # Sessões da administradora + remoção do adminPin das configurações
 │       ├── 005_site_content.sql                 # Mídia WebP, banners, faixas promocionais e vitrine
 │       ├── 006_payments_and_financial_lock.sql  # Blindagem financeira, colunas do gateway e tabela payment_webhook_events (RLS)
-│       └── 007_coupon_usage_lock.sql            # Bloqueio de cupom de 1ª compra e registro único de uso por cliente (RLS)
+│       ├── 007_coupon_usage_lock.sql            # Bloqueio de cupom de 1ª compra e registro único de uso por cliente (RLS)
+│       └── 008_shipping_loggi_and_motoboy.sql   # Colunas de transportadora, rastreio e Loggi em public.orders
 ├── tests/
 │   └── security-auth.test.mjs          # Testes automatizados oficiais (14/14 passando contra o Supabase em 06/11/2026)
 ├── docs/
@@ -271,6 +274,20 @@
   * `createGatewayCharge()` captura `pixQrImage` (`encodedImage` em base64 do Asaas), `pixQrPayload` (Copia e Cola), `boletoLine` e `checkoutUrl`, com geração compatível no modo `sandbox_sim`.
   * `buildPaymentActionBox(order)` em [js/order.js](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/js/order.js) renderiza QR Code PIX + botão copiar, código de barras + botão copiar do boleto e botão `"Pagar ou abrir fatura segura no Asaas"` enquanto o pagamento está pendente.
   * `getOrderTrackingInPg()` devolve os metadados de pagamento não sensíveis para manter a tela sincronizada.
+
+### [LOG-017] Logística Híbrida (Motoboy Cambé R$ 10 / Londrina R$ 20) + API da Transportadora Loggi
+* **Ação:** Implementada a regra definitiva de entrega e frete calculada autoritativamente no servidor e exibida em tempo real no checkout, no pedido e no painel.
+* **Migração Aplicada:** [supabase/migrations/008_shipping_loggi_and_motoboy.sql](supabase/migrations/008_shipping_loggi_and_motoboy.sql):
+  * Novas colunas em `public.orders`: `shipping_carrier`, `tracking_code`, `tracking_url`, `loggi_shipment_id`, `shipped_at`.
+* **Módulo de Frete e Envio ([server/shipping-loggi.mjs](supabase/migrations/../server/shipping-loggi.mjs)):**
+  * **Cambé / PR** (cidade `Cambé` ou CEP `86180-000` a `86199-999`) → `motoboy_cambe`, frete fixo **R$ 10,00 (`1000` centavos)**.
+  * **Londrina / PR** (cidade `Londrina` ou CEP `86000-000` a `86124-999`) → `motoboy_londrina`, frete fixo **R$ 20,00 (`2000` centavos)**.
+  * **Demais cidades** → `loggi` (**Transportadora Loggi**), com cotação OAuth2 na API oficial da Loggi quando `SHIPPING_PROVIDER=loggi` e `LOGGI_CLIENT_ID`/`LOGGI_CLIENT_SECRET`/`LOGGI_COMPANY_ID` estiverem no `.env` (ou tabela regional Loggi no modo `sandbox_sim`).
+* **Rotas e Painel:**
+  * Rota pública `POST /api/v1/store/shipping/quote` em [server/auth-routes.mjs](server/auth-routes.mjs) e auto-busca de endereço via ViaCEP em [js/checkout.js](js/checkout.js).
+  * Rota admin `POST /api/v1/store/orders/:orderId/loggi-shipment` em [server/admin-routes.mjs](server/admin-routes.mjs) + botão **"Gerar envio na Loggi"** em [js/admin/app.js](js/admin/app.js), bloqueando geração caso o pedido seja retirada ou Motoboy de Cambé/Londrina.
+  * Exibição do código e link de rastreio Loggi em [js/order.js](js/order.js) (`pedido.html`).
+* **Testes:** Adicionado Teste 11 em [tests/security-auth.test.mjs](tests/security-auth.test.mjs) e atualizado Teste 9 (Londrina = R$ 20,00).
 
 ---
 

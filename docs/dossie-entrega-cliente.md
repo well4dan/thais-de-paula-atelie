@@ -210,6 +210,10 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
 4. **CPF Protegido por LGPD no Checkout e QR Code PIX / Fatura na Página do Pedido (`checkout.html` e `pedido.html`):**
    * Adicionado campo de **CPF validado** no checkout (preenchido automaticamente quando a cliente já tem conta), permitindo emissão imediata de nota/cobrança no **Asaas** sem gravar o CPF aberto nos pedidos (apenas mascarado `***.456.789-00`).
    * A página do pedido (`pedido.html`) já exibe o **QR Code PIX**, botão **Copiar PIX (Copia e Cola)**, linha digitável de boleto e botão direto para a **fatura segura no Asaas**.
+5. **Frete Híbrido: Motoboy Regional + Transportadora Loggi (`008_shipping_loggi_and_motoboy.sql`):**
+   * **Cambé / PR:** Entrega via Motoboy com valor fixo de **R$ 10,00** identificado automaticamente pelo CEP ou cidade.
+   * **Londrina / PR:** Entrega via Motoboy com valor fixo de **R$ 20,00** identificado automaticamente pelo CEP ou cidade.
+   * **Demais cidades do Brasil:** Cotação automática para envio pela **Transportadora Loggi** (`server/shipping-loggi.mjs`), com botão **"Gerar envio na Loggi"** direto no painel da Thaís para emitir o código e link de rastreio.
 
 ---
 

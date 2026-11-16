@@ -14,6 +14,7 @@ import {
   sha256Hex,
 } from "./crypto.mjs";
 import { createGatewayCharge } from "./payments.mjs";
+import { calculateShippingQuote, createLoggiShipmentForOrder } from "./shipping-loggi.mjs";
 
 export class ConflictError extends Error {
   constructor(message, field) {
@@ -453,7 +454,7 @@ export async function getPublicStoreSnapshot() {
 export async function getOrderTrackingInPg(orderId, phoneLast4) {
   await ensureDatabaseReady();
   const { rows } = await pool.query(
-    `SELECT id, customer_json, payment_json, payment_provider, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, status, history_json, lead_days, created_at
+    `SELECT id, customer_json, shipping_json, shipping_carrier, tracking_code, tracking_url, payment_json, payment_provider, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, status, history_json, lead_days, created_at
      FROM public.orders WHERE id = $1`,
     [orderId]
   );
@@ -473,6 +474,13 @@ export async function getOrderTrackingInPg(orderId, phoneLast4) {
     createdAt: order.created_at instanceof Date ? order.created_at.toISOString() : order.created_at,
     history: (order.history_json || []).map((h) => ({ at: h.at, status: h.status, note: h.note })),
     items: items.map((it) => ({ name: it.name, image: it.image, qty: it.qty })),
+    shipping: {
+      method: order.shipping_json?.method || "retirada",
+      carrier: order.shipping_carrier || order.shipping_json?.carrier || "retirada",
+      serviceLabel: order.shipping_json?.serviceLabel || null,
+      trackingCode: order.tracking_code || order.shipping_json?.trackingCode || null,
+      trackingUrl: order.tracking_url || order.shipping_json?.trackingUrl || null,
+    },
     payment: {
       method: order.payment_json?.method || "pix",
       status: order.payment_json?.status || "pendente",
@@ -489,7 +497,7 @@ export async function getOrderTrackingInPg(orderId, phoneLast4) {
 export async function getUserOrdersInPg(userId) {
   await ensureDatabaseReady();
   const { rows: orders } = await pool.query(
-    `SELECT id, customer_json, shipping_json, payment_json, coupon_code, totals_json, lead_days, status, history_json, created_at
+    `SELECT id, customer_json, shipping_json, shipping_carrier, tracking_code, tracking_url, payment_json, coupon_code, totals_json, lead_days, status, history_json, created_at
      FROM public.orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
     [userId]
   );
@@ -518,7 +526,12 @@ export async function getUserOrdersInPg(userId) {
     id: o.id,
     createdAt: o.created_at instanceof Date ? o.created_at.toISOString() : o.created_at,
     customer: o.customer_json,
-    shipping: o.shipping_json,
+    shipping: {
+      ...(o.shipping_json || {}),
+      carrier: o.shipping_carrier || o.shipping_json?.carrier || null,
+      trackingCode: o.tracking_code || o.shipping_json?.trackingCode || null,
+      trackingUrl: o.tracking_url || o.shipping_json?.trackingUrl || null,
+    },
     payment: o.payment_json,
     coupon: o.coupon_code,
     items: itemsByOrder.get(o.id) || [],
@@ -591,7 +604,13 @@ export async function getAdminStoreSnapshot() {
       createdAt: o.created_at instanceof Date ? o.created_at.toISOString() : o.created_at,
       demo: o.is_demo,
       customer: o.customer_json,
-      shipping: o.shipping_json,
+      shipping: {
+        ...(o.shipping_json || {}),
+        carrier: o.shipping_carrier || o.shipping_json?.carrier || null,
+        trackingCode: o.tracking_code || o.shipping_json?.trackingCode || null,
+        trackingUrl: o.tracking_url || o.shipping_json?.trackingUrl || null,
+        loggiShipmentId: o.loggi_shipment_id || null,
+      },
       payment: o.payment_json,
       coupon: o.coupon_code,
       items: itemsByOrder.get(o.id) || [],
@@ -944,10 +963,16 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
     }
 
     const shippingMethod = orderInput.shipping?.method === "envio" ? "envio" : "retirada";
-    const shippingCost =
-      shippingMethod === "envio" && subtotal - discount < Number(storeCfg.freeShippingMin || 19900)
-        ? Number(storeCfg.shippingFlat || 1890)
-        : 0;
+    const totalQty = computedItems.reduce((sum, it) => sum + it.qty, 0);
+    const shipQuote = await calculateShippingQuote({
+      method: shippingMethod,
+      cep: orderInput.shipping?.cep || "",
+      city: orderInput.shipping?.city || "",
+      uf: orderInput.shipping?.uf || "",
+      itemsCount: totalQty,
+      settings: storeCfg,
+    });
+    const shippingCost = shipQuote.priceCents;
     const total = Math.max(0, subtotal - discount + shippingCost);
     const serverTotals = { subtotal, discount, shipping: shippingCost, total };
 
@@ -991,7 +1016,13 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
       id: orderId,
       createdAt,
       customer: safeCustomer,
-      shipping: { ...(orderInput.shipping || {}), method: shippingMethod },
+      shipping: {
+        ...(orderInput.shipping || {}),
+        method: shippingMethod,
+        carrier: shipQuote.carrier,
+        serviceLabel: shipQuote.serviceLabel,
+        estimatedDays: shipQuote.estimatedDays,
+      },
       payment: { ...(orderInput.payment || {}), method: paymentMethod },
       totals: serverTotals,
     };
@@ -1030,8 +1061,8 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
     await client.query(
       `INSERT INTO public.orders
        (id, user_id, customer_json, shipping_json, payment_json, coupon_code, totals_json, lead_days, status, history_json,
-        payment_provider, gateway_charge_id, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, paid_at, is_demo, created_at, updated_at)
-       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7::jsonb,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,false,$17,NOW())`,
+        shipping_carrier, payment_provider, gateway_charge_id, gateway_checkout_url, pix_qr_payload, boleto_digitable_line, paid_at, is_demo, created_at, updated_at)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7::jsonb,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,false,$18,NOW())`,
       [
         orderId,
         userId,
@@ -1043,6 +1074,7 @@ export async function createOrderInPg(orderInput, userId = null, requestId = nul
         maxLead || 5,
         finalStatus,
         JSON.stringify(history),
+        shipQuote.carrier,
         charge.provider,
         charge.chargeId,
         charge.checkoutUrl,
@@ -1528,6 +1560,104 @@ export async function updateOrderStatusInPg({ id, status, payment, history }) {
       }
     }
     await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function generateLoggiShipmentInPg(orderId, requestId = null) {
+  await ensureDatabaseReady();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT * FROM public.orders WHERE id = $1 FOR UPDATE", [orderId]);
+    const orderRow = rows[0];
+    if (!orderRow) {
+      throw orderValidationError("Pedido não encontrado.", 404, "ORDER_NOT_FOUND");
+    }
+    const shippingJson = orderRow.shipping_json || {};
+    if (shippingJson.method !== "envio") {
+      throw orderValidationError("Este pedido é de retirada no ateliê e não usa transportadora.", 400, "SHIPPING_NOT_DELIVERY");
+    }
+    if (orderRow.shipping_carrier === "motoboy_cambe" || orderRow.shipping_carrier === "motoboy_londrina") {
+      throw orderValidationError("Pedidos de Cambé e Londrina são entregues via Motoboy, não pela Loggi.", 400, "SHIPPING_IS_MOTOBOY");
+    }
+    if (orderRow.tracking_code) {
+      await client.query("COMMIT");
+      return {
+        alreadyGenerated: true,
+        orderId,
+        shipmentId: orderRow.loggi_shipment_id,
+        trackingCode: orderRow.tracking_code,
+        trackingUrl: orderRow.tracking_url,
+      };
+    }
+
+    const { rows: items } = await client.query(
+      "SELECT product_id, name, qty FROM public.order_items WHERE order_id = $1",
+      [orderId]
+    );
+    const shipment = await createLoggiShipmentForOrder({
+      id: orderId,
+      customer: orderRow.customer_json || {},
+      shipping: shippingJson,
+      items,
+    });
+
+    const nextShipping = {
+      ...shippingJson,
+      carrier: "loggi",
+      serviceLabel: "Transportadora Loggi",
+      trackingCode: shipment.trackingCode,
+      trackingUrl: shipment.trackingUrl,
+    };
+    const history = Array.isArray(orderRow.history_json) ? [...orderRow.history_json] : [];
+    history.push({
+      at: new Date().toISOString(),
+      status: orderRow.status,
+      note: `Envio gerado na Transportadora Loggi (Rastreio: ${shipment.trackingCode}).`,
+    });
+
+    await client.query(
+      `UPDATE public.orders
+       SET shipping_carrier = 'loggi',
+           tracking_code = $1,
+           tracking_url = $2,
+           loggi_shipment_id = $3,
+           shipped_at = NOW(),
+           shipping_json = $4::jsonb,
+           history_json = $5::jsonb,
+           updated_at = NOW()
+       WHERE id = $6`,
+      [
+        shipment.trackingCode,
+        shipment.trackingUrl,
+        shipment.shipmentId,
+        JSON.stringify(nextShipping),
+        JSON.stringify(history),
+        orderId,
+      ]
+    );
+
+    await writeAudit(client, {
+      requestId: requestId || "loggi",
+      actorId: null,
+      action: "LOGGI_SHIPMENT_CREATED",
+      details: { orderId, trackingCode: shipment.trackingCode, provider: shipment.provider },
+    });
+
+    await client.query("COMMIT");
+    return {
+      alreadyGenerated: false,
+      orderId,
+      provider: shipment.provider,
+      shipmentId: shipment.shipmentId,
+      trackingCode: shipment.trackingCode,
+      trackingUrl: shipment.trackingUrl,
+    };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

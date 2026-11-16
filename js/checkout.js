@@ -13,6 +13,7 @@ const state = {
   couponCode: "",
   serverCouponError: "",
   loggedUserHasCpf: false,
+  serverShippingQuote: null,
 };
 
 function currentCustomerHint() {
@@ -22,14 +23,31 @@ function currentCustomerHint() {
   };
 }
 
+function currentShippingDestination() {
+  return {
+    cep: ($("#c-cep")?.value || "").trim(),
+    city: ($("#c-city")?.value || "").trim(),
+    uf: ($("#c-uf")?.value || "").trim().toUpperCase(),
+  };
+}
+
 function renderSummary() {
   const box = clear($("#checkout-summary"));
   const totals = store.computeTotals({
     couponCode: state.couponCode,
     shippingMethod: state.shippingMethod,
+    shippingDestination: currentShippingDestination(),
+    serverShippingQuote: state.serverShippingQuote,
     customer: currentCustomerHint(),
     serverCouponError: state.serverCouponError,
   });
+
+  const shipInfoEl = $("#shipping-quote-info");
+  if (shipInfoEl && state.shippingMethod === "envio" && totals.shippingQuote) {
+    const q = totals.shippingQuote;
+    const daysText = q.estimatedDays ? ` (estimativa: ${q.estimatedDays} dia${q.estimatedDays > 1 ? "s" : ""} úteis após produção)` : "";
+    shipInfoEl.textContent = `Modalidade identificada: ${q.serviceLabel} - ${money(q.priceCents)}${daysText}`;
+  }
 
   if (!totals.rows.length) {
     box.append(h("div", { class: "empty" },
@@ -173,9 +191,52 @@ function validateForm() {
   return ok;
 }
 
+async function refreshShippingQuote() {
+  if (state.shippingMethod !== "envio") {
+    state.serverShippingQuote = null;
+    renderSummary();
+    return;
+  }
+  const dest = currentShippingDestination();
+  const itemsCount = store.cartCount();
+  const quote = await store.quoteShippingOnServer({
+    method: "envio",
+    cep: dest.cep,
+    city: dest.city,
+    uf: dest.uf,
+    itemsCount,
+  });
+  state.serverShippingQuote = quote;
+  renderSummary();
+}
+
 $("#c-phone")?.addEventListener("input", (e) => { e.target.value = maskPhone(e.target.value); });
 $("#c-cpf")?.addEventListener("input", (e) => { e.target.value = maskCpf(e.target.value); });
-$("#c-cep")?.addEventListener("input", (e) => { e.target.value = maskCep(e.target.value); });
+$("#c-cep")?.addEventListener("input", async (e) => {
+  e.target.value = maskCep(e.target.value);
+  const digits = onlyDigits(e.target.value);
+  if (digits.length === 8) {
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const data = await res.json();
+      if (data && !data.erro) {
+        if ($("#c-city") && data.localidade) $("#c-city").value = data.localidade;
+        if ($("#c-uf") && data.uf) $("#c-uf").value = data.uf;
+        if ($("#c-street") && !$("#c-street").value && data.logradouro) $("#c-street").value = data.logradouro;
+        if ($("#c-district") && !$("#c-district").value && data.bairro) $("#c-district").value = data.bairro;
+      }
+    } catch {
+      // Continua com digitação manual
+    }
+    refreshShippingQuote();
+  }
+});
+$("#c-city")?.addEventListener("input", () => {
+  state.serverShippingQuote = null;
+  renderSummary();
+});
+$("#c-city")?.addEventListener("change", () => refreshShippingQuote());
+$("#c-uf")?.addEventListener("change", () => refreshShippingQuote());
 
 $$("[data-ship-method]").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -183,7 +244,7 @@ $$("[data-ship-method]").forEach((btn) => {
     $$("[data-ship-method]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
     const addr = $("#address-fields");
     if (addr) addr.hidden = state.shippingMethod !== "envio";
-    renderSummary();
+    refreshShippingQuote();
   });
 });
 
@@ -301,5 +362,6 @@ fetchCurrentUser().then((user) => {
     if ($("#c-number") && !$("#c-number").value) $("#c-number").value = user.address.number || "";
     if ($("#c-district") && !$("#c-district").value) $("#c-district").value = user.address.district || "";
     if ($("#c-uf") && !$("#c-uf").value) $("#c-uf").value = user.address.uf || "PR";
+    if (state.shippingMethod === "envio") refreshShippingQuote();
   }
 });

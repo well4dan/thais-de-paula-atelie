@@ -14,6 +14,7 @@ import {
   getOrderZipManifestInPg,
   purgeOrderAttachmentsByOrderIdInPg,
   runExpiredAttachmentsPurgeInPg,
+  generateLoggiShipmentInPg,
 } from "./db.mjs";
 import {
   ADMIN_COOKIE_NAME,
@@ -147,6 +148,13 @@ async function routeAdminRequest(req, res, url, session, requestId) {
   if (method === "PATCH" && pathname === "/api/v1/store/orders/status") {
     await updateOrderStatusInPg(await readJsonBody(req));
     return sendJson(res, 200, { ok: true, requestId });
+  }
+
+  // Gera coleta / etiqueta de envio na Transportadora Loggi (exclusivo para pedidos fora de Cambé/Londrina)
+  const loggiMatch = pathname.match(/^\/api\/v1\/store\/orders\/([A-Za-z0-9-]{1,40})\/loggi-shipment$/);
+  if (method === "POST" && loggiMatch) {
+    const shipment = await generateLoggiShipmentInPg(loggiMatch[1], requestId);
+    return sendJson(res, 200, { ok: true, shipment, requestId });
   }
 
   if (pathname === "/api/v1/store/products" && (method === "POST" || method === "DELETE")) {

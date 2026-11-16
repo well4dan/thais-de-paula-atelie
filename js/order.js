@@ -39,6 +39,14 @@ function renderTracking(order) {
       h("span", { class: "tag tag--pronta", text: store.STATUS[order.status]?.label || order.status }),
       h("h1", { class: "section-title", style: "margin-top:0.5rem", text: `Pedido ${order.id}` }),
       h("p", { class: "muted", text: `Realizado em ${dateTime(order.createdAt)}${last?.note ? ` | ${last.note}` : ""}` }),
+      order.shipping?.serviceLabel ? h("p", { class: "field__hint", style: "margin-top:0.35rem", text: `Entrega: ${order.shipping.serviceLabel}` }) : null,
+      order.shipping?.trackingCode
+        ? h("p", { class: "field__hint", style: "margin-top:0.25rem" },
+            `Rastreio Loggi: ${order.shipping.trackingCode} `,
+            order.shipping.trackingUrl
+              ? h("a", { class: "link-btn", href: order.shipping.trackingUrl, target: "_blank", rel: "noopener noreferrer" }, "Acompanhar entrega")
+              : null)
+        : null,
       buildTimeline(order.status),
       h("h2", { style: "font-size:1.5rem;margin:1.5rem 0 0.75rem", text: "Itens da encomenda" }),
       itemsList)));
@@ -143,7 +151,14 @@ function renderOrder(order) {
             h("div", { class: "drawer__row" }, h("span", { text: "Entrega" }), h("span", { text: order.totals.shipping === 0 ? "Grátis" : money(order.totals.shipping) })),
             h("div", { class: "drawer__row drawer__row--total" }, h("span", { text: "Total" }), h("span", { text: money(order.totals.total) })),
             h("p", { class: "field__hint", style: "margin-top:0.5rem", text: `Forma de pagamento: ${(order.payment?.method || "pix").toUpperCase()} (${order.payment?.status || "pendente"})` }),
-            h("p", { class: "field__hint", text: order.shipping.method === "envio" ? `Entrega: ${order.shipping.street}, ${order.shipping.number} (${order.shipping.city}/${order.shipping.uf})` : "Entrega: Retirada combinada pelo WhatsApp" }),
+            h("p", { class: "field__hint", text: order.shipping?.method === "envio" ? `${order.shipping.serviceLabel || "Entrega"}: ${order.shipping.street}, ${order.shipping.number} (${order.shipping.city}/${order.shipping.uf})` : "Entrega: Retirada combinada pelo WhatsApp" }),
+            order.shipping?.trackingCode
+              ? h("div", { style: "margin-top:0.35rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center" },
+                  h("span", { class: "field__hint", text: `Rastreio Loggi: ${order.shipping.trackingCode}` }),
+                  order.shipping.trackingUrl
+                    ? h("a", { class: "link-btn", href: order.shipping.trackingUrl, target: "_blank", rel: "noopener noreferrer" }, "Rastrear na Loggi")
+                    : null)
+              : null,
             payBox))))));
 }
 

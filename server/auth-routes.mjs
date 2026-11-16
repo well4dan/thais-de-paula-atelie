@@ -22,6 +22,7 @@ import {
 } from "./db.mjs";
 import { ensureDatabaseReady, pool } from "./pg-pool.mjs";
 import { verifyWebhookAuth, normalizeWebhookPayload } from "./payments.mjs";
+import { calculateShippingQuote } from "./shipping-loggi.mjs";
 import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
 import {
@@ -109,6 +110,31 @@ export async function handleApiRequest(req, res, url) {
         phone: body.phone || "",
       });
       return sendJson(res, 200, { ok: true, coupon: result.coupon, discount: result.discount, requestId });
+    }
+
+    // Cotação pública de frete: Motoboy Cambé (R$ 10) / Londrina (R$ 20) / Demais cidades via Loggi
+    if (req.method === "POST" && url.pathname === "/api/v1/store/shipping/quote") {
+      const rl = checkRateLimit(`ship:${ip}`, 60, 15 * 60 * 1000);
+      if (!rl.allowed) {
+        return sendJson(
+          res,
+          429,
+          { code: "RATE_LIMITED", message: "Muitas cotações em sequência. Aguarde alguns instantes.", requestId },
+          { "Retry-After": String(rl.retryAfterSec) }
+        );
+      }
+      const body = await readJsonBody(req);
+      await ensureDatabaseReady();
+      const { rows: setRows } = await pool.query("SELECT settings_json FROM public.store_settings WHERE id = 1");
+      const quote = await calculateShippingQuote({
+        method: body.method === "envio" ? "envio" : "retirada",
+        cep: body.cep || "",
+        city: body.city || "",
+        uf: body.uf || "",
+        itemsCount: Number(body.itemsCount || 1),
+        settings: setRows[0]?.settings_json || {},
+      });
+      return sendJson(res, 200, { ok: true, quote, requestId });
     }
 
     // Receptor oficial de Webhooks de Pagamento (Asaas / HMAC-SHA256) com verificação criptográfica e idempotência

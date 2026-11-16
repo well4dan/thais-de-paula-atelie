@@ -301,8 +301,46 @@ function matchesCustomerOrder(order, email = "", phone = "") {
   return false;
 }
 
+function normalizeCityLocal(city = "") {
+  return String(city || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+export function classifyShippingLocal({ method = "retirada", cep = "", city = "", uf = "", itemsCount = 1 } = {}, cfg = settings()) {
+  if (method !== "envio") {
+    return { carrier: "retirada", serviceLabel: "Retirada combinada pelo WhatsApp", priceCents: 0, estimatedDays: 0 };
+  }
+  const normCity = normalizeCityLocal(city);
+  const cepNum = Number(String(cep || "").replace(/\D+/g, ""));
+  if (normCity === "cambe" || (!normCity && cepNum >= 86180000 && cepNum <= 86199999) || (normCity !== "londrina" && cepNum >= 86180000 && cepNum <= 86199999)) {
+    return { carrier: "motoboy_cambe", serviceLabel: "Entrega via Motoboy (Cambé)", priceCents: Number(cfg.motoboyCambe ?? 1000), estimatedDays: 1 };
+  }
+  if (normCity === "londrina" || (!normCity && cepNum >= 86000000 && cepNum <= 86124999)) {
+    return { carrier: "motoboy_londrina", serviceLabel: "Entrega via Motoboy (Londrina)", priceCents: Number(cfg.motoboyLondrina ?? 2000), estimatedDays: 1 };
+  }
+  const cleanUf = String(uf || "").trim().toUpperCase();
+  const prefix2 = Math.floor(cepNum / 1000000);
+  const extraUnits = Math.max(0, Number(itemsCount || 1) - 2) * 200;
+  let baseCents = 3490;
+  let estimatedDays = 7;
+  if (cleanUf === "PR" || (prefix2 >= 80 && prefix2 <= 87)) {
+    baseCents = 1890;
+    estimatedDays = 3;
+  } else if (["SP", "SC", "RS"].includes(cleanUf) || (prefix2 >= 1 && prefix2 <= 19) || (prefix2 >= 88 && prefix2 <= 99)) {
+    baseCents = 2390;
+    estimatedDays = 4;
+  } else if (["RJ", "MG", "ES", "MS", "MT", "GO", "DF"].includes(cleanUf) || (prefix2 >= 20 && prefix2 <= 39) || (prefix2 >= 70 && prefix2 <= 79)) {
+    baseCents = 2890;
+    estimatedDays = 5;
+  }
+  return { carrier: "loggi", serviceLabel: "Transportadora Loggi", priceCents: baseCents + extraUnits, estimatedDays };
+}
+
 /* Totais */
-export function computeTotals({ items = cart(), couponCode = "", shippingMethod = "retirada", customer = null, serverCouponError = "" } = {}) {
+export function computeTotals({ items = cart(), couponCode = "", shippingMethod = "retirada", shippingDestination = null, serverShippingQuote = null, customer = null, serverCouponError = "" } = {}) {
   const cfg = settings();
   const errors = [];
   const rows = [];
@@ -342,9 +380,47 @@ export function computeTotals({ items = cart(), couponCode = "", shippingMethod 
       discount = coupon.type === "percent" ? Math.round((subtotal * coupon.value) / 100) : Math.min(coupon.value, subtotal);
     }
   }
-  const shipping = shippingMethod === "envio" && subtotal - discount < cfg.freeShippingMin ? cfg.shippingFlat : 0;
+  const itemsCount = rows.reduce((n, r) => n + r.item.qty, 0);
+  const shippingQuote = serverShippingQuote || classifyShippingLocal({
+    method: shippingMethod,
+    cep: shippingDestination?.cep || "",
+    city: shippingDestination?.city || "",
+    uf: shippingDestination?.uf || "",
+    itemsCount,
+  }, cfg);
+  const shipping = shippingQuote.priceCents;
   const maxLead = rows.reduce((m, r) => Math.max(m, r.product.mode === "demanda" ? r.product.leadDays : cfg.readyShipDays), 0);
-  return { rows, subtotal, discount, coupon, couponError, shipping, total: subtotal - discount + shipping, errors, maxLead };
+  return { rows, subtotal, discount, coupon, couponError, shipping, shippingQuote, total: subtotal - discount + shipping, errors, maxLead };
+}
+
+export async function quoteShippingOnServer({ method = "retirada", cep = "", city = "", uf = "", itemsCount = 1 }) {
+  if (typeof fetch !== "function") return null;
+  try {
+    const res = await fetch("/api/v1/store/shipping/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ method, cep, city, uf, itemsCount }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    return data.quote || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function generateLoggiShipment(orderId) {
+  const res = await fetch(`/api/v1/store/orders/${encodeURIComponent(orderId)}/loggi-shipment`, {
+    method: "POST",
+    headers: apiHeaders("POST"),
+    credentials: "same-origin",
+  });
+  notifyIfAdminExpired(res);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new StoreError(data.code || "loggi_error", data.message || "Não foi possível gerar envio na Loggi.");
+  await pullFromPostgres({ admin: true });
+  return data.shipment;
 }
 
 export async function validateCouponOnServer({ code, subtotal, email, phone }) {
@@ -376,7 +452,7 @@ function nextOrderId(list) {
 }
 
 export async function createOrder({ customer, shipping, payment, couponCode }) {
-  const totals = computeTotals({ couponCode, shippingMethod: shipping.method, customer });
+  const totals = computeTotals({ couponCode, shippingMethod: shipping.method, shippingDestination: shipping, customer });
   if (!totals.rows.length) throw new StoreError("empty", "Seu carrinho está vazio.");
   if (totals.errors.length) throw new StoreError("stock", totals.errors[0]);
   if (couponCode && totals.couponError) throw new StoreError("coupon", totals.couponError);

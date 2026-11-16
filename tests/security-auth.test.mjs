@@ -492,11 +492,12 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     assert.equal(resOrder.status, 201);
     const orderBody = await resOrder.json();
 
-    // O servidor recalculou tudo no PostgreSQL: p01 (6990) + frete padrão (1890) = 8880 centavos, status = aguardando,
+    // O servidor recalculou tudo no PostgreSQL: p01 (6990) + Motoboy Londrina (2000) = 8990 centavos, status = aguardando,
     // gera boletoLine e mascara o CPF no pedido gravado (sem nunca expor ou salvar CPF aberto em orders.customer_json)
     assert.equal(orderBody.order.totals.subtotal, 6990);
-    assert.equal(orderBody.order.totals.shipping, 1890);
-    assert.equal(orderBody.order.totals.total, 8880);
+    assert.equal(orderBody.order.totals.shipping, 2000);
+    assert.equal(orderBody.order.totals.total, 8990);
+    assert.equal(orderBody.order.shipping.carrier, "motoboy_londrina");
     assert.equal(orderBody.order.status, "aguardando");
     assert.ok(orderBody.order.payment.boletoLine);
     assert.equal(orderBody.order.customer.cpf, undefined);
@@ -508,7 +509,7 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
       payment: {
         id: "pay_000005400000",
         externalReference: fakeOrderId,
-        value: 88.8,
+        value: 89.9,
       },
     };
 
@@ -698,5 +699,118 @@ test("Segurança de Autenticação, CPF, Endereço, Termos, LGPD, E-commerce e K
     await pool.query(
       "UPDATE public.coupons c SET used_count = (SELECT COUNT(*)::int FROM public.coupon_redemptions cr WHERE cr.coupon_code = c.code)"
     );
+  });
+
+  await t.test("11. Frete híbrido (Motoboy Cambé R$ 10 / Londrina R$ 20) e geração de envio Loggi para outras cidades", async () => {
+    clearRateLimitsForTest();
+    // 11a. Cotação para Cambé = R$ 10,00
+    const qCambe = await fetch(`${baseUrl}/api/v1/store/shipping/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "envio", cep: "86181-000", city: "Cambé", uf: "PR", itemsCount: 1 }),
+    });
+    assert.equal(qCambe.status, 200);
+    const cambeBody = await qCambe.json();
+    assert.equal(cambeBody.quote.carrier, "motoboy_cambe");
+    assert.equal(cambeBody.quote.priceCents, 1000);
+
+    // 11b. Cotação para Londrina = R$ 20,00
+    const qLondrina = await fetch(`${baseUrl}/api/v1/store/shipping/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "envio", cep: "86010-150", city: "Londrina", uf: "PR", itemsCount: 1 }),
+    });
+    assert.equal(qLondrina.status, 200);
+    const londrinaBody = await qLondrina.json();
+    assert.equal(londrinaBody.quote.carrier, "motoboy_londrina");
+    assert.equal(londrinaBody.quote.priceCents, 2000);
+
+    // 11c. Cotação para São Paulo = Transportadora Loggi
+    const qSp = await fetch(`${baseUrl}/api/v1/store/shipping/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "envio", cep: "01310-100", city: "São Paulo", uf: "SP", itemsCount: 1 }),
+    });
+    assert.equal(qSp.status, 200);
+    const spBody = await qSp.json();
+    assert.equal(spBody.quote.carrier, "loggi");
+    assert.equal(spBody.quote.priceCents, 2390);
+
+    // Cria 1 pedido em Cambé e 1 pedido em São Paulo
+    const suf = String(Date.now()).slice(-4);
+    const ordCambeId = `TP-2026-81${suf}`;
+    const ordSpId = `TP-2026-82${suf}`;
+
+    const rCambe = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: ordCambeId,
+          customer: { name: "Cliente Cambe", email: "cambe@exemplo.com.br", phone: "(43) 98888-1122" },
+          shipping: { method: "envio", cep: "86181-000", street: "Av Brasil", number: "100", city: "Cambé", uf: "PR" },
+          payment: { method: "pix", status: "aprovado" },
+          items: [{ productId: "p01", qty: 1, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(rCambe.status, 201);
+    const ordCambeBody = await rCambe.json();
+    assert.equal(ordCambeBody.order.totals.shipping, 1000);
+    assert.equal(ordCambeBody.order.shipping.carrier, "motoboy_cambe");
+
+    const rSp = await fetch(`${baseUrl}/api/v1/store/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order: {
+          id: ordSpId,
+          customer: { name: "Cliente SP", email: "sp@exemplo.com.br", phone: "(11) 97777-3344" },
+          shipping: { method: "envio", cep: "01310-100", street: "Av Paulista", number: "900", city: "São Paulo", uf: "SP" },
+          payment: { method: "pix", status: "aprovado" },
+          items: [{ productId: "p01", qty: 1, selections: {} }],
+        },
+      }),
+    });
+    assert.equal(rSp.status, 201);
+    const ordSpBody = await rSp.json();
+    assert.equal(ordSpBody.order.totals.shipping, 2390);
+    assert.equal(ordSpBody.order.shipping.carrier, "loggi");
+
+    // Autentica como admin e testa geração de envio na Loggi
+    const adminLogin = await fetch(`${baseUrl}/api/v1/admin/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: TEST_ADMIN_EMAIL, password: TEST_ADMIN_PASSWORD }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const admCookie = adminLogin.headers.get("set-cookie").split(";")[0];
+    const { csrfToken: admCsrf } = await adminLogin.json();
+
+    // Pedido de Cambé (motoboy) recusa geração de etiqueta Loggi
+    const shipCambe = await fetch(`${baseUrl}/api/v1/store/orders/${ordCambeId}/loggi-shipment`, {
+      method: "POST",
+      headers: { Cookie: admCookie, "X-CSRF-Token": admCsrf },
+    });
+    assert.equal(shipCambe.status, 400);
+
+    // Pedido de São Paulo (Loggi) gera código de rastreio LGG...BR e link Loggi
+    const shipSp = await fetch(`${baseUrl}/api/v1/store/orders/${ordSpId}/loggi-shipment`, {
+      method: "POST",
+      headers: { Cookie: admCookie, "X-CSRF-Token": admCsrf },
+    });
+    assert.equal(shipSp.status, 200);
+    const shipSpBody = await shipSp.json();
+    assert.match(shipSpBody.shipment.trackingCode, /^LGG\d{9}BR$/);
+    assert.ok(shipSpBody.shipment.trackingUrl.includes("loggi.com"));
+
+    // Rastreio público já devolve o código e link da Loggi
+    const trk = await fetch(`${baseUrl}/api/v1/store/orders/${ordSpId}/track?phone=3344`);
+    assert.equal(trk.status, 200);
+    const trkBody = await trk.json();
+    assert.equal(trkBody.order.shipping.trackingCode, shipSpBody.shipment.trackingCode);
+
+    // Limpeza dos pedidos de teste
+    await pool.query("DELETE FROM public.orders WHERE id IN ($1, $2)", [ordCambeId, ordSpId]);
   });
 });
