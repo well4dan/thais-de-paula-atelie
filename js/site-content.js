@@ -283,11 +283,32 @@ function renderPopup(popup) {
 
 /* ---------- Entrada ---------- */
 
-export function initSiteContent() {
-  const content = readContent();
+function applyContent(content) {
   if (!content) return;
+  const page = location.pathname || "/";
+  if ((page === "/" || page === "/index.html") && content.banners?.topo?.length) {
+    document.documentElement.setAttribute("data-hero-banner", "");
+  }
   renderAnnouncements(content.announcements);
   renderHeroBanners(content.banners?.topo);
   renderMiddleBanners(content.banners?.meio);
   renderPopup(content.banners?.popup);
+}
+
+export async function initSiteContent() {
+  const inline = readContent();
+  if (inline) {
+    applyContent(inline);
+    return;
+  }
+  if (typeof fetch !== "function") return;
+  try {
+    const res = await fetch(`/api/v1/site/content?page=${encodeURIComponent(location.pathname || "/")}`);
+    if (!res.ok) return;
+    const isJson = (res.headers.get("content-type") || "").includes("application/json");
+    if (!isJson) return;
+    applyContent(await res.json());
+  } catch {
+    // Sem servidor ou offline: mantém o conteúdo padrão estático
+  }
 }

@@ -12,9 +12,9 @@
   * **Backend / API:** Node.js Nativo (`http`, `crypto`), sem Express (`server.mjs`, `server/auth-routes.mjs`, `server/security.mjs`, `server/pg-pool.mjs`, `server/db.mjs`).
   * **Banco de Dados:** **Supabase PostgreSQL** via `pg@8.13.3` (`DATABASE_URL` no `.env`). Row Level Security (RLS) habilitada em todas as 13 tabelas.
   * **Painel admin:** login no servidor com `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` no `.env` (gerar com `npm run admin:hash`). Sem servidor (Vercel estática, só demonstração), o painel cai em modo demonstração com PIN local.
-  * **Hospedagem atual:** Vercel apenas como **demonstração estática** para a cliente (sem Node, sem dados reais). O backend Node + Supabase roda só localmente por enquanto.
-  * **Criptografia & Auth:** Senhas com `scrypt` + salt criptográfico. CPF com `AES-256-GCM` em repouso e índice cego `HMAC-SHA256` para busca única sem expor dados. Sessões com Cookie `HttpOnly; SameSite=Lax` e proteção CSRF com `X-CSRF-Token`.
-  * **Keep-Alive Supabase (Anti-Pausa):** Sistema triplo (cron interno de 6h no servidor, endpoint `GET /api/v1/health/keep-alive` e workflow do GitHub Actions `.github/workflows/supabase-keepalive.yml` a cada 48h).
+  * **Hospedagem:** **Vercel unificada no mesmo domínio** (`npm run build` gera `dist/` apenas com os arquivos públicos; [api/index.mjs](api/index.mjs) atende `/api/v1/*`, `/media/*` e `/health` como Serverless Function). Localmente continua usando [server.mjs](server.mjs).
+  * **Criptografia & Auth:** Senhas com `scrypt` + salt criptográfico. CPF com `AES-256-GCM` em repouso e índice cego `HMAC-SHA256` para busca única sem expor dados. Sessões com Cookie `HttpOnly; SameSite=Lax` (`Secure` automático em `NODE_ENV=production` ou `VERCEL=1`) e proteção CSRF com `X-CSRF-Token`.
+  * **Keep-Alive Supabase (Anti-Pausa):** Sistema triplo: cron interno de 6h no servidor local (`server.mjs`), cron diário nativo da Vercel (`vercel.json` -> `GET /api/v1/health/keep-alive`) e workflow do GitHub Actions (`.github/workflows/supabase-keepalive.yml`) a cada 48h.
   * **Conformidade Legal:** Termos de Uso ([termos-de-uso.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/termos-de-uso.html)), Termo de Consentimento LGPD ([termo-lgpd.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/termo-lgpd.html)), Política de Privacidade ([politica-de-privacidade.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/politica-de-privacidade.html)), e Portal de Autoatendimento com Portabilidade JSON e Direito ao Esquecimento ([minha-conta.html](file:///home/wellington/Projetos/SITES/Thais%20de%20Paula/minha-conta.html)).
 
 ---
@@ -320,6 +320,25 @@
 
 ---
 
+### [LOG-020] Site + Servidor Node.js Unificados no Mesmo Domínio na Vercel
+* **Ação:** Adaptado todo o projeto para operar em produção **100% na Vercel no mesmo domínio** (frontend estático pela Edge CDN em `dist/` + API Node.js completa em uma Serverless Function `api/index.mjs`), preservando compatibilidade integral com `node server.mjs`.
+* **Build Público e Isolamento ([scripts/build-vercel.mjs](scripts/build-vercel.mjs), [package.json](package.json), [.vercelignore](.vercelignore), [vercel.json](vercel.json)):**
+  * `npm run build` (`scripts/build-vercel.mjs`) limpa e copia para `dist/` apenas a lista explícita (whitelist) de HTMLs, assets e pastas públicas (`css/`, `js/`, `img/`, `fonts/`, `painel-tp/`), mantendo `server/`, `supabase/`, `tests/`, `docs/`, `.env` e `server.mjs` totalmente inacessíveis pela CDN.
+  * `vercel.json` configura `outputDirectory: "dist"`, `functions["api/index.mjs"]` com `maxDuration: 60` e `includeFiles: "supabase/migrations/**"`, rewrites `/api/v1/:path*`, `/media/:file` e `/health` via `__tp_route` para `/api/index.mjs`, cron diário `"0 9 * * *"` em `/api/v1/health/keep-alive` e cabeçalhos CSP/`X-Robots-Tag`.
+* **Entrypoint Serverless ([api/index.mjs](api/index.mjs) e [server/http-utils.mjs](server/http-utils.mjs)):**
+  * Exportado `resolveVercelUrl(req)` (reconstitui URL e query strings rejeitando traversal ou acesso direto sem `__tp_route`) e `handler(req, res)`.
+  * Unificados os cabeçalhos de segurança em `applySecurityHeaders(res, pathname)` e adicionada guarda `if (req.readableEnded)` em `readRawBody`.
+* **Cold Start Rápido & FS Somente Leitura ([server/pg-pool.mjs](server/pg-pool.mjs), [server/crypto.mjs](server/crypto.mjs), [server/admin-auth.mjs](server/admin-auth.mjs)):**
+  * Em serverless (`VERCEL` / `AWS_LAMBDA_FUNCTION_NAME`), o pool reduz para `max: 3` e `idleTimeoutMillis: 10000`; `ensureDatabaseReady()` checa via query leve se tabelas/colunas `002..008` e seed já existem antes de rodar DDLs (com `pg_advisory_lock(741852963)` se necessário) e lê `.sql` relativo a `import.meta.url`.
+  * `server/crypto.mjs` exige `APP_SECRET_HEX` quando `VERCEL=1` (evitando erro `EROFS` em `data/.secret_key`); cookies `tp_session` e `tp_admin` marcam `; Secure` automaticamente em `VERCEL=1` inclusive no logout.
+* **Conteúdo Dinâmico na CDN & Upload ([server/auth-routes.mjs](server/auth-routes.mjs), [js/site-content.js](js/site-content.js), [js/product.js](js/product.js)):**
+  * Criada rota pública `GET /api/v1/site/content` (com `s-maxage=30, stale-while-revalidate=60`) consumida por `initSiteContent()` quando `#site-content` não vem injetado no HTML.
+  * `js/product.js` mantém arquivos originais até 3 MB e otimiza automaticamente imagens entre 3 MB e 8 MB em 2400px (JPEG 0.90) para respeitar o limite de payload (4,5 MB) da Vercel.
+* **Testes ([tests/vercel-adapter.test.mjs](tests/vercel-adapter.test.mjs)):**
+  * Validado `buildPublicDist()`, `resolveVercelUrl()` e chamadas HTTP reais ao handler serverless (`/health`, `/api/v1/store/snapshot`, `/api/v1/site/content`, `/api/v1/cep/86181-000`, `/api/v1/webhooks/payment` 401 e 404). Suíte completa aprovada: **33 de 33 testes, 0 falhas**.
+
+---
+
 ## ✅ Checklist de Pendências (ordem de prioridade)
 - [x] 🔴 Recalcular preço, desconto e frete no servidor em `POST /api/v1/store/orders` (veto V7 FECHADO no LOG-014).
 - [x] 🔴 Receptor de Webhooks com verificação criptográfica (`asaas-access-token` / HMAC-SHA256) e idempotência no PostgreSQL (LOG-014).
@@ -331,7 +350,7 @@
 - [x] 🟡 `GET /api/v1/me/orders` para "Minha conta" listar pedidos de qualquer aparelho (LOG-011).
 - [ ] 🟡 Vincular upload de foto a um token do carrinho.
 - [ ] 🟡 Backup com restore testado + RTO/RPO.
-- [ ] 🟡 Definir hospedagem do backend Node (servidor contínuo, por causa do keep-alive interno) para sair da demo estática.
+- [x] 🟡 Adaptar backend Node + estáticos para rodar unificado no mesmo domínio na Vercel (LOG-020: `dist/` + `api/index.mjs` + Cron Keep-Alive). Falta apenas cadastrar as Environment Variables no painel da Vercel e publicar.
 - [ ] 🔵 Fotos no Supabase Storage privado; MFA da admin; converter o dossiê para PDF.
 
 ---

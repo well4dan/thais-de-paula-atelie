@@ -26,6 +26,7 @@ import { calculateShippingQuote } from "./shipping-loggi.mjs";
 import { lookupCepInProviders } from "./cep.mjs";
 import { handleAdminRequest } from "./admin-routes.mjs";
 import { pingKeepAlive } from "./pg-pool.mjs";
+import { getPublicSiteContent } from "./site-content.mjs";
 import {
   validateRegistration,
   validateProfileUpdate,
@@ -46,13 +47,16 @@ import {
 export { checkRateLimit, clearRateLimitsForTest } from "./http-utils.mjs";
 
 const COOKIE_NAME = "tp_session";
+const isHttpsCookie = () => process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+
 function formatSessionCookie(token, maxAgeSec = 7 * 24 * 60 * 60) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = isHttpsCookie() ? "; Secure" : "";
   return `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
 }
 
 function clearSessionCookie() {
-  return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+  const secure = isHttpsCookie() ? "; Secure" : "";
+  return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 function verifyCsrf(req, session) {
@@ -80,6 +84,24 @@ export async function handleApiRequest(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/v1/store/snapshot") {
       const snap = await getPublicStoreSnapshot();
       return sendJson(res, 200, { ...snap, requestId });
+    }
+
+    // 0.2 Conteúdo público do site (faixas promocionais, banners ativos e popup para CDN/Vercel)
+    if (req.method === "GET" && url.pathname === "/api/v1/site/content") {
+      const rawPage = String(url.searchParams.get("page") || "/index.html").split("?")[0];
+      const normalizedPage = rawPage === "/" || rawPage === "" ? "/index.html" : rawPage;
+      const withBanners = normalizedPage === "/index.html" || normalizedPage === "/loja.html";
+      const content = await getPublicSiteContent();
+      return sendJson(
+        res,
+        200,
+        {
+          announcements: content.announcements,
+          banners: withBanners ? content.banners : { topo: [], meio: [], popup: null },
+          requestId,
+        },
+        { "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=60" }
+      );
     }
 
     if (req.method === "POST" && url.pathname === "/api/v1/store/orders") {

@@ -1,0 +1,12 @@
+dist/
+data/
+tests/
+docs/
+.claude/
+.github/
+CLAUDE_HANDOVER_LOG.md
+README.md
+IMG-*.jpg
+.env
+.env.*
+*.log

@@ -3,6 +3,7 @@
 // - CPF criptografado em repouso com AES-256-GCM + índice cego HMAC-SHA256 para busca de unicidade
 // - Tokens de sessão e CSRF com entropia criptográfica (randomBytes)
 
+import "./env.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +15,11 @@ function loadMasterKey() {
   const fromEnv = process.env.APP_SECRET_HEX;
   if (fromEnv && /^[0-9a-fA-F]{64}$/.test(fromEnv.trim())) {
     return Buffer.from(fromEnv.trim(), "hex");
+  }
+  if (process.env.VERCEL === "1") {
+    throw new Error(
+      "APP_SECRET_HEX (64 caracteres hexadecimais) é obrigatório na Vercel. Configure em Project Settings > Environment Variables."
+    );
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (fs.existsSync(SECRET_FILE)) {

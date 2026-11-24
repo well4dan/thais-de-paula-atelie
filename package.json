@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Site institucional, e-commerce, autenticação segura e conformidade LGPD do Thaís de Paula Ateliê",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node server.mjs",
+    "build": "node scripts/build-vercel.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "keep-alive": "node scripts/keep-alive.mjs",
     "admin:hash": "node scripts/admin-hash.mjs"

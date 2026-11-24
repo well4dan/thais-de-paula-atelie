@@ -4,6 +4,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { handleApiRequest } from "./server/auth-routes.mjs";
+import { applySecurityHeaders } from "./server/http-utils.mjs";
 import { ensureDatabaseReady, pingKeepAlive } from "./server/pg-pool.mjs";
 import { serveMedia } from "./server/media.mjs";
 import { getPublicSiteContent } from "./server/site-content.mjs";
@@ -30,21 +31,6 @@ const MIME_TYPES = {
 };
 
 const FORBIDDEN_PREFIXES = ["/server", "/data", "/supabase", "/tests", "/docs", "/scripts", "/node_modules", "/.git", "/.env"];
-
-function setSecurityHeaders(res, pathname) {
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self' https://brasilapi.com.br https://viacep.com.br https://opencep.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"
-  );
-  if (pathname.startsWith("/painel-tp") || pathname.startsWith("/minha-conta") || pathname.startsWith("/conta")) {
-    res.setHeader("X-Robots-Tag", "noindex, nofollow");
-  }
-}
 
 // Páginas que recebem banners e popup (as demais públicas recebem só as faixas promocionais)
 const BANNER_PAGES = new Set(["/index.html", "/loja.html"]);
@@ -79,7 +65,7 @@ async function injectSiteContent(html, pagePath) {
 export function createAppServer() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-    setSecurityHeaders(res, url.pathname);
+    applySecurityHeaders(res, url.pathname);
 
     if (url.pathname === "/health") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });

@@ -218,6 +218,8 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
    * Ao digitar o CEP no **Cadastro de Conta**, na área **Minha Conta** ou no **Checkout**, o sistema consulta automaticamente 3 bases oficiais gratuitas em cascata com cache de 24h, preenchendo Rua, Bairro, Cidade e Estado sem erro de digitação e já calculando o frete correto na mesma hora.
 7. **Controle de Upload de Fotos por Produto e por Linha no Painel (`/painel-tp/`):**
    * Na aba **Produtos & Estoque**, a coluna **Upload de Fotos** permite habilitar ou desabilitar com um clique quais peças aceitam envio de imagens pelo cliente (e escolher se o envio é **opcional** ou **obrigatório**), além de contar com filtro por linha (ex.: *Cadernos personalizados*) e botões em lote (**Ativar/Desativar upload de fotos nesta linha**) que preservam todas as opções de personalização do produto (nome, tamanho, miolo, tema).
+8. **Hospedagem Unificada no Mesmo Domínio na Vercel (`dist/` + `api/index.mjs` + Cron Keep-Alive):**
+   * Site, painel `/painel-tp/`, API do banco Supabase, cálculo de frete Loggi/Motoboy, busca de CEP e receptor de Webhook do Asaas operam unificados sob o **mesmo domínio** na Vercel (`npm run build` publica somente os arquivos públicos em `dist/` e `api/index.mjs` executa o servidor Node sob demanda), com cron diário nativo mantendo o Supabase sempre ativo.
 
 ---
 
@@ -257,8 +259,8 @@ Este documento registra todas as etapas concebidas, desenvolvidas, auditadas e i
   * Teste 4b: "Minha conta" exige login e lista só os pedidos da própria cliente, com a etapa atualizada pelo ateliê (`PASS`).
   * Teste 7: Direito ao esquecimento LGPD com exclusão e anonimização no PostgreSQL (`PASS`).
   * Teste 8: Foto original enviada pela cliente baixada byte a byte idêntica (individual e dentro do `.ZIP`, com conferência de CRC-32), foto vencida fora do pacote e expurgo após 7 dias com `HTTP 410` (`PASS`).
-  * Testes 9, 10 e 11 + `tests/site-content.test.mjs`: Blindagem financeira (V7), Webhook Asaas idempotente, bloqueio de cupons de 1ª compra/reutilizados, frete híbrido Motoboy (Cambé R$ 10 / Londrina R$ 20) + Loggi, API gratuita de CEP, vitrine/banners e alternância de upload de fotos por produto preservando opções no PostgreSQL (`PASS`).
-  * **Resultado da última execução (16/11/2026): 29 de 29 testes aprovados, 0 falhas.**
+  * Testes 9, 10 e 11 + `tests/site-content.test.mjs` + `tests/vercel-adapter.test.mjs`: Blindagem financeira (V7), Webhook Asaas idempotente, bloqueio de cupons de 1ª compra/reutilizados, frete híbrido Motoboy (Cambé R$ 10 / Londrina R$ 20) + Loggi, API gratuita de CEP, vitrine/banners, upload de fotos por produto e adaptador unificado Vercel `dist/` + `api/index.mjs` (`PASS`).
+  * **Resultado da última execução (24/11/2026): 33 de 33 testes aprovados, 0 falhas.**
 
 ---
 

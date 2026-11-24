@@ -49,7 +49,37 @@ export function sendJson(res, status, payload, extraHeaders = {}) {
   res.end(body);
 }
 
+export function applySecurityHeaders(res, pathname = "/") {
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self' https://brasilapi.com.br https://viacep.com.br https://opencep.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://wa.me"
+  );
+  if (
+    pathname.startsWith("/painel-tp") ||
+    pathname.startsWith("/minha-conta") ||
+    pathname.startsWith("/conta") ||
+    pathname.startsWith("/api")
+  ) {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  }
+}
+
 export async function readRawBody(req, maxBytes = 2 * 1024 * 1024) {
+  if (req.readableEnded) {
+    let text = "";
+    if (Buffer.isBuffer(req.body)) text = req.body.toString("utf8");
+    else if (typeof req.body === "string") text = req.body;
+    else if (req.body && typeof req.body === "object") text = JSON.stringify(req.body);
+    if (Buffer.byteLength(text, "utf8") > maxBytes) {
+      throw Object.assign(new Error("Payload muito grande."), { status: 413, code: "PAYLOAD_TOO_LARGE" });
+    }
+    return text;
+  }
   return new Promise((resolve, reject) => {
     let total = 0;
     const chunks = [];

@@ -24,13 +24,16 @@ export function verifyAdminCredentials(email, password) {
   return passwordOk && emailOk;
 }
 
+const isHttpsCookie = () => process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+
 export function formatAdminCookie(token, maxAgeSec = ADMIN_SESSION_TTL_SEC) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = isHttpsCookie() ? "; Secure" : "";
   return `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${maxAgeSec}${secure}`;
 }
 
 export function clearAdminCookie() {
-  return `${ADMIN_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`;
+  const secure = isHttpsCookie() ? "; Secure" : "";
+  return `${ADMIN_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0${secure}`;
 }
 
 export async function createAdminSession({ ip, userAgent }) {

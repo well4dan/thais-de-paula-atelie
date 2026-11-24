@@ -31,7 +31,7 @@ function readOriginalFileAsBase64(file) {
   });
 }
 
-function resizeImageFile(file, maxSide = 360) {
+function resizeImageFile(file, maxSide = 360, quality = 0.78) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type.startsWith("image/")) {
       reject(new Error("Selecione um arquivo de imagem (JPG, PNG ou WebP)."));
@@ -62,7 +62,7 @@ function resizeImageFile(file, maxSide = 360) {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.78));
+        resolve(canvas.toDataURL("image/jpeg", quality));
       };
       img.src = reader.result;
     };
@@ -171,7 +171,10 @@ function buildOptionField(opt) {
           thumb.src = photoData;
           const newAttachments = [];
           for (const f of files) {
-            const rawBase64 = await readOriginalFileAsBase64(f);
+            // Na Vercel cada requisição aceita até ~4,5 MB: envia original até 3 MB e otimiza acima disso em 2400px (alta impressão)
+            const usePrintOptimize = f.size > 3 * 1024 * 1024;
+            const payloadBase64 = usePrintOptimize ? await resizeImageFile(f, 2400, 0.9) : await readOriginalFileAsBase64(f);
+            const payloadMime = usePrintOptimize ? "image/jpeg" : f.type || "image/jpeg";
             try {
               const res = await fetch("/api/v1/store/attachments", {
                 method: "POST",
@@ -179,8 +182,8 @@ function buildOptionField(opt) {
                 body: JSON.stringify({
                   productId: product.id,
                   fileName: f.name,
-                  mimeType: f.type || "image/jpeg",
-                  base64Data: rawBase64,
+                  mimeType: payloadMime,
+                  base64Data: payloadBase64,
                 }),
               });
               if (res.ok) {
